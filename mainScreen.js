@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect } from "react";
-import {
-    View, SafeAreaView, FlatList, TouchableOpacity,
-    Alert, StyleSheet, Modal, ScrollView, TextInput
-} from "react-native";
+import {View, SafeAreaView, FlatList, TouchableOpacity,Alert, StyleSheet, Modal, ScrollView, TextInput} from "react-native";
 import { Text, Button, IconButton, Divider, ActivityIndicator } from "react-native-paper";
-import { collection, onSnapshot, doc, getDoc, addDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, onSnapshot, doc, getDoc, addDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import MapView, { Marker, Callout } from "react-native-maps";
 import * as Location from 'expo-location';
@@ -12,8 +9,7 @@ import * as Location from 'expo-location';
 const MainScreen = ({ navigation }) => {
     const [hazards, setHazards] = useState([]);
     const [alerts, setAlerts] = useState([]);
-    
-    // User Location States
+    const [sosMessages, setSosMessages] = useState([]);
     const [currentLocation, setCurrentLocation] = useState({
         coords: { latitude: 33.769217, longitude: -117.867665 }
     });
@@ -21,9 +17,6 @@ const MainScreen = ({ navigation }) => {
     const [userIsTracking, setUserIsTracking] = useState(true); 
 
     const [studentData, setStudentData] = useState(null);
-    const [weather, setWeather] = useState(null);
-    const [error, setError] = useState(null);
-    const [isModalVisible, setIsModalVisible] = useState(false);
     const [studentID, setStudentID] = useState(null);
 
     const [activeMapTab, setActiveMapTab] = useState('Hazard');
@@ -54,7 +47,6 @@ const MainScreen = ({ navigation }) => {
     const mappedCrimes = hazards.filter(h => h.category === 'Crime' && h.location?.latitude && h.location?.longitude);
     const mappedSafeSpaces = hazards.filter(h => h.category === 'SafeSpace' && h.location?.latitude && h.location?.longitude);
 
-    // ---------------- AUTH LISTENER ----------------
     useEffect(() => {
         const unsub = auth.onAuthStateChanged((user) => {
             setStudentID(user?.uid ?? null);
@@ -62,51 +54,28 @@ const MainScreen = ({ navigation }) => {
         return unsub;
     }, []);
 
-    // ---------------- FETCH STUDENT DATA ----------------
-    useEffect(() => {
-        if (!studentID) return;
-        const fetchStudentData = async () => {
-            try {
-                const studentDoc = await getDoc(doc(db, "students", studentID));
-                if (studentDoc.exists()) {
-                    setStudentData(studentDoc.data());
-                }
-            } catch (err) {
-                console.error("Error fetching student data:", err);
+
+useEffect(() => {
+    if (!studentID) return;
+    const fetchStudentData = async () => {
+        try {
+            // Changed "students" to "users" here
+            const userDoc = await getDoc(doc(db, "users", studentID));
+            if (userDoc.exists()) {
+                setStudentData(userDoc.data());
             }
-        };
-        fetchStudentData();
-    }, [studentID]);
+        } catch (err) {
+            console.error("Error fetching user data:", err);
+        }
+    };
+    fetchStudentData();
+}, [studentID]);
 
-    // ---------------- WEATHER API FETCH ----------------
-    useEffect(() => {
-        const fetchWeather = async () => {
-            try {
-                const apiKey = "6f3a0d0256c16b6d937b2d6686b373b1";
-                const city = "Irvine";
-                const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${city}&units=imperial&appid=${apiKey}`);
-                const data = await res.json();
-
-                if (!res.ok) throw new Error("Weather failed");
-                setWeather({ temperature: Math.round(data.main.temp), condition: data.weather[0].main });
-            } catch (err) {
-                setError("Weather unavailable");
-            }
-        };
-        fetchWeather();
-    }, []);
-
-    // ---------------- HEADER NAVIGATION CONFIG ----------------
     useLayoutEffect(() => {
         navigation.setOptions({
             headerTitle: () => (
                 <View style={styles.headerContainer}>
                     <Text style={styles.welcomeText}>Welcome, {studentData?.name ?? "User"}!</Text>
-                    {weather ? (
-                        <Text style={styles.weatherText}>{weather.temperature}°F, {weather.condition}</Text>
-                    ) : (
-                        <Text style={styles.weatherErrorText}>{error || "Loading weather..."}</Text>
-                    )}
                 </View>
             ),
             headerRight: () => (
@@ -118,9 +87,8 @@ const MainScreen = ({ navigation }) => {
                 />
             ),
         });
-    }, [navigation, studentData, weather]);
+    }, [navigation, studentData]);
 
-    // ---------------- REAL-TIME LOCATION ----------------
     useEffect(() => {
         let locationSubscriber = null;
 
@@ -176,19 +144,79 @@ const MainScreen = ({ navigation }) => {
             setAlerts(arr);
         });
 
+        const unsubSOS = onSnapshot(collection(db, "help_messages"), (snap) => {
+            const arr = snap.docs
+                .map(d => {
+                    const data = d.data();
+                    return {
+                        id: d.id,
+                        ...data,
+                        createdDateTime: data.createdDateTime?.toDate?.()?.toLocaleString() ?? "Just now",
+                        location: data.location ? {
+                            latitude: Number(data.location.latitude),
+                            longitude: Number(data.location.longitude)
+                        } : null
+                    };
+                })
+                .filter(item => item.status === 'active' && item.location?.latitude && item.location?.longitude);
+            
+            setSosMessages(arr);
+        });
 
         startLocationTracking();
 
         return () => {
             unsubHazards();
             unsubAlerts();
+            unsubSOS();
             if (locationSubscriber) {
                 locationSubscriber.remove();
             }
         };
     }, []);
 
-    // ---------------- HANDLERS ----------------
+    const handleResolveSOS = (sosId) => {
+        Alert.alert(
+            "Clear SOS Marker",
+            "Are you sure you want to resolve and remove this emergency SOS pin?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Clear SOS",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await updateDoc(doc(db, "help_messages", sosId), { status: "resolved" });
+                        } catch (err) {
+                            Alert.alert("Error", "Could not remove SOS pin.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDeleteHazardPin = (hazardId) => {
+        Alert.alert(
+            "Remove Pin",
+            "Are you sure you want to delete this marker from the map?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete Pin",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await deleteDoc(doc(db, "hazards", hazardId));
+                        } catch (err) {
+                            Alert.alert("Error", "Could not delete map marker.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const handleCreateAlert = async () => {
         if (!newAlertMessage.trim()) return;
         setIsSubmitting(true);
@@ -299,6 +327,21 @@ const MainScreen = ({ navigation }) => {
                         >
                             <Marker coordinate={currentLocation.coords} title="Your Location" pinColor="blue" />
 
+                            {/* EMERGENCY SOS MARKERS WITH CLEAR ACTION */}
+                            {sosMessages.map((sos) => (
+                                <Marker key={sos.id} coordinate={sos.location} pinColor="red">
+                                    <Callout onPress={() => handleResolveSOS(sos.id)}>
+                                        <View style={styles.calloutBox}>
+                                            <Text style={[styles.calloutTitle, { color: '#D32F2F' }]}>🚨 EMERGENCY SOS</Text>
+                                            <Text style={styles.calloutStatus}>Sent: {sos.createdDateTime}</Text>
+                                            <Text style={styles.calloutDescription}>{sos.message}</Text>
+                                            <Text style={styles.deleteLink}>Tap to Resolve & Remove Pin ✖</Text>
+                                        </View>
+                                    </Callout>
+                                </Marker>
+                            ))}
+
+                            {/* HAZARD MARKERS WITH DETAILS / DELETE OPTIONS */}
                             {activeMapTab === 'Hazard' && mappedHazards.map(h => (
                                 <Marker key={h.id} coordinate={h.location} pinColor={h.status === "Active" ? "red" : "orange"}>
                                     <Callout onPress={() => navigation.navigate('HazardUpdateScreen', { hazard: h })}>
@@ -307,11 +350,15 @@ const MainScreen = ({ navigation }) => {
                                             <Text style={styles.calloutStatus}>Status: {getStatusLabel(h.status)}</Text>
                                             <Text numberOfLines={2} style={styles.calloutDescription}>{h.description}</Text>
                                             <Text style={styles.calloutLink}>View Details & Update →</Text>
+                                            <TouchableOpacity onPress={() => handleDeleteHazardPin(h.id)}>
+                                                <Text style={styles.deleteLink}>Delete Pin ✖</Text>
+                                            </TouchableOpacity>
                                         </View>
                                     </Callout>
                                 </Marker>
                             ))}
 
+                            {/* CRIME MARKERS WITH DETAILS / DELETE OPTIONS */}
                             {activeMapTab === 'Crime' && mappedCrimes.map(c => (
                                 <Marker key={c.id} coordinate={c.location} pinColor="purple">
                                     <Callout onPress={() => navigation.navigate('HazardUpdateScreen', { hazard: c })}>
@@ -320,11 +367,15 @@ const MainScreen = ({ navigation }) => {
                                             <Text style={styles.calloutStatus}>Status: {getStatusLabel(c.status)}</Text>
                                             <Text numberOfLines={2} style={styles.calloutDescription}>{c.description}</Text>
                                             <Text style={styles.calloutLink}>View Details & Update →</Text>
+                                            <TouchableOpacity onPress={() => handleDeleteHazardPin(c.id)}>
+                                                <Text style={styles.deleteLink}>Delete Pin ✖</Text>
+                                            </TouchableOpacity>
                                         </View>
                                     </Callout>
                                 </Marker>
                             ))}
 
+                            {/* SAFE SPACE MARKERS WITH DETAILS / DELETE OPTIONS */}
                             {activeMapTab === 'SafeSpace' && mappedSafeSpaces.map(s => (
                                 <Marker key={s.id} coordinate={s.location} pinColor="green">
                                     <Callout onPress={() => navigation.navigate('HazardUpdateScreen', { hazard: s })}>
@@ -333,6 +384,9 @@ const MainScreen = ({ navigation }) => {
                                             <Text style={styles.calloutStatus}>Status: {getStatusLabel(s.status)}</Text>
                                             <Text numberOfLines={2} style={styles.calloutDescription}>{s.description}</Text>
                                             <Text style={styles.calloutLink}>View Details & Update →</Text>
+                                            <TouchableOpacity onPress={() => handleDeleteHazardPin(s.id)}>
+                                                <Text style={styles.deleteLink}>Delete Pin ✖</Text>
+                                            </TouchableOpacity>
                                         </View>
                                     </Callout>
                                 </Marker>
@@ -342,7 +396,7 @@ const MainScreen = ({ navigation }) => {
                 )}
             </View>
 
-            <Button mode="contained" style={styles.safetyButton} onPress={() => setIsModalVisible(true)}>
+            <Button mode="contained" style={styles.safetyButton} onPress={() => navigation.navigate('EbikeSafetyScreen')}>
                 E-Bike Safety
             </Button>
 
@@ -354,24 +408,11 @@ const MainScreen = ({ navigation }) => {
                     Add Suggest
                 </Button>
                 <Button mode="contained" onPress={() => navigation.navigate('Walk Group List')} style={styles.actionButton} labelStyle={styles.actionButtonLabel}>
-                    Join Group
+                    Volunteer
                 </Button>
             </View>
 
-            <Modal visible={isModalVisible} transparent animationType="slide">
-                <View style={styles.modalContainer}>
-                    <View style={styles.modalContent}>
-                        <ScrollView>
-                            <Text style={styles.modalTitle}>E-Bike Safety Tips</Text>
-                            <Text style={{ marginVertical: 4 }}>1. Always wear an approved helmet.</Text>
-                            <Text style={{ marginVertical: 4 }}>2. Follow all standard regional speed regulations.</Text>
-                            <Text style={{ marginVertical: 4 }}>3. Check systems before operations.</Text>
-                        </ScrollView>
-                        <Button onPress={() => setIsModalVisible(false)}>Close</Button>
-                    </View>
-                </View>
-            </Modal>
-
+            {/* Create Alert Modal */}
             <Modal visible={isAlertModalVisible} transparent animationType="fade">
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
@@ -393,6 +434,7 @@ const MainScreen = ({ navigation }) => {
                 </View>
             </Modal>
 
+            {/* View Alert Modal */}
             <Modal visible={isViewModalVisible} transparent animationType="fade">
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
@@ -432,10 +474,8 @@ const styles = StyleSheet.create({
     detailScrollArea: { marginVertical: 10, maxHeight: 150 },
     detailMessageText: { fontSize: 15, lineHeight: 22, color: '#222' },
     detailTimestampText: { fontSize: 12, color: '#666', marginTop: 12, fontStyle: 'italic' },
-    headerContainer: { flexDirection: 'row', alignItems: 'center', gap: 15 },
+    headerContainer: { flexDirection: 'row', alignItems: 'center' },
     welcomeText: { fontSize: 16, fontWeight: 'bold' },
-    weatherText: { fontSize: 14 },
-    weatherErrorText: { color: 'red', fontSize: 14 },
     safetyButton: { marginVertical: 5 },
     bottomActionBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 5, gap: 6 },
     actionButton: { flex: 1, borderRadius: 8 },
@@ -450,6 +490,7 @@ const styles = StyleSheet.create({
     calloutStatus: { fontSize: 11, color: '#666', fontStyle: 'italic', marginBottom: 4 },
     calloutDescription: { fontSize: 12, color: '#333', marginBottom: 6 },
     calloutLink: { fontSize: 12, color: '#007AFF', fontWeight: 'bold', marginTop: 2 },
+    deleteLink: { fontSize: 12, color: '#D32F2F', fontWeight: 'bold', marginTop: 6 },
     recenterButton: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(255, 255, 255, 0.9)', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, zIndex: 10, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
     recenterButtonText: { color: '#1C1B1F', fontWeight: 'bold', fontSize: 12 }
 });
