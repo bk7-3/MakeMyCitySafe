@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect } from "react";
-import {View, SafeAreaView, FlatList, TouchableOpacity,Alert, StyleSheet, Modal, ScrollView, TextInput} from "react-native";
+import { View, SafeAreaView, FlatList, TouchableOpacity, Alert, StyleSheet, Modal, ScrollView, TextInput } from "react-native";
 import { Text, Button, IconButton, Divider, ActivityIndicator } from "react-native-paper";
 import { collection, onSnapshot, doc, getDoc, addDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../firebase";
@@ -10,21 +10,15 @@ const MainScreen = ({ navigation }) => {
     const [hazards, setHazards] = useState([]);
     const [alerts, setAlerts] = useState([]);
     const [sosMessages, setSosMessages] = useState([]);
-    const [currentLocation, setCurrentLocation] = useState({
-        coords: { latitude: 33.769217, longitude: -117.867665 }
-    });
+    const [currentLocation, setCurrentLocation] = useState(null);
     const [loadingLocation, setLoadingLocation] = useState(true);
     const [userIsTracking, setUserIsTracking] = useState(true); 
-
     const [studentData, setStudentData] = useState(null);
     const [studentID, setStudentID] = useState(null);
-
     const [activeMapTab, setActiveMapTab] = useState('Hazard');
-
     const [isAlertModalVisible, setIsAlertModalVisible] = useState(false);
     const [newAlertMessage, setNewAlertMessage] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
-
     const [selectedAlert, setSelectedAlert] = useState(null);
     const [isViewModalVisible, setIsViewModalVisible] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -54,22 +48,20 @@ const MainScreen = ({ navigation }) => {
         return unsub;
     }, []);
 
-
-useEffect(() => {
-    if (!studentID) return;
-    const fetchStudentData = async () => {
-        try {
-            // Changed "students" to "users" here
-            const userDoc = await getDoc(doc(db, "users", studentID));
-            if (userDoc.exists()) {
-                setStudentData(userDoc.data());
+    useEffect(() => {
+        if (!studentID) return;
+        const fetchStudentData = async () => {
+            try {
+                const userDoc = await getDoc(doc(db, "users", studentID));
+                if (userDoc.exists()) {
+                    setStudentData(userDoc.data());
+                }
+            } catch (err) {
+                console.error("Error fetching user data:", err);
             }
-        } catch (err) {
-            console.error("Error fetching user data:", err);
-        }
-    };
-    fetchStudentData();
-}, [studentID]);
+        };
+        fetchStudentData();
+    }, [studentID]);
 
     useLayoutEffect(() => {
         navigation.setOptions({
@@ -100,7 +92,9 @@ useEffect(() => {
                     return;
                 }
 
-                let initialLoc = await Location.getCurrentPositionAsync({});
+                let initialLoc = await Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.Balanced,
+                });
                 setCurrentLocation(initialLoc);
                 setLoadingLocation(false);
 
@@ -249,7 +243,7 @@ useEffect(() => {
     };
 
     const getMapRegion = () => {
-        if (userIsTracking) {
+        if (userIsTracking && currentLocation?.coords) {
             return {
                 latitude: currentLocation.coords.latitude,
                 longitude: currentLocation.coords.longitude,
@@ -325,9 +319,16 @@ useEffect(() => {
                             region={getMapRegion()}
                             onPanDrag={() => setUserIsTracking(false)}
                         >
-                            <Marker coordinate={currentLocation.coords} title="Your Location" pinColor="blue" />
+                            {/* 3. Render user pin only when coordinates are available */}
+                            {currentLocation?.coords && (
+                                <Marker 
+                                    coordinate={currentLocation.coords} 
+                                    title="Your Location" 
+                                    pinColor="blue" 
+                                />
+                            )}
 
-                            {/* EMERGENCY SOS MARKERS WITH CLEAR ACTION */}
+                            {/* EMERGENCY SOS MARKERS */}
                             {sosMessages.map((sos) => (
                                 <Marker key={sos.id} coordinate={sos.location} pinColor="red">
                                     <Callout onPress={() => handleResolveSOS(sos.id)}>
@@ -341,7 +342,7 @@ useEffect(() => {
                                 </Marker>
                             ))}
 
-                            {/* HAZARD MARKERS WITH DETAILS / DELETE OPTIONS */}
+                            {/* HAZARD MARKERS */}
                             {activeMapTab === 'Hazard' && mappedHazards.map(h => (
                                 <Marker key={h.id} coordinate={h.location} pinColor={h.status === "Active" ? "red" : "orange"}>
                                     <Callout onPress={() => navigation.navigate('HazardUpdateScreen', { hazard: h })}>
@@ -358,7 +359,7 @@ useEffect(() => {
                                 </Marker>
                             ))}
 
-                            {/* CRIME MARKERS WITH DETAILS / DELETE OPTIONS */}
+                            {/* CRIME MARKERS */}
                             {activeMapTab === 'Crime' && mappedCrimes.map(c => (
                                 <Marker key={c.id} coordinate={c.location} pinColor="purple">
                                     <Callout onPress={() => navigation.navigate('HazardUpdateScreen', { hazard: c })}>
@@ -375,7 +376,7 @@ useEffect(() => {
                                 </Marker>
                             ))}
 
-                            {/* SAFE SPACE MARKERS WITH DETAILS / DELETE OPTIONS */}
+                            {/* SAFE SPACE MARKERS */}
                             {activeMapTab === 'SafeSpace' && mappedSafeSpaces.map(s => (
                                 <Marker key={s.id} coordinate={s.location} pinColor="green">
                                     <Callout onPress={() => navigation.navigate('HazardUpdateScreen', { hazard: s })}>
