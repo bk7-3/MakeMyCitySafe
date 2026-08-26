@@ -10,15 +10,21 @@ const MainScreen = ({ navigation }) => {
     const [hazards, setHazards] = useState([]);
     const [alerts, setAlerts] = useState([]);
     const [sosMessages, setSosMessages] = useState([]);
+    
+    // 1. Initialized to null instead of hardcoded coordinates
     const [currentLocation, setCurrentLocation] = useState(null);
     const [loadingLocation, setLoadingLocation] = useState(true);
     const [userIsTracking, setUserIsTracking] = useState(true); 
+
     const [studentData, setStudentData] = useState(null);
     const [studentID, setStudentID] = useState(null);
+
     const [activeMapTab, setActiveMapTab] = useState('Hazard');
+
     const [isAlertModalVisible, setIsAlertModalVisible] = useState(false);
     const [newAlertMessage, setNewAlertMessage] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+
     const [selectedAlert, setSelectedAlert] = useState(null);
     const [isViewModalVisible, setIsViewModalVisible] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -92,12 +98,14 @@ const MainScreen = ({ navigation }) => {
                     return;
                 }
 
+                // Get real initial location
                 let initialLoc = await Location.getCurrentPositionAsync({
                     accuracy: Location.Accuracy.Balanced,
                 });
                 setCurrentLocation(initialLoc);
                 setLoadingLocation(false);
 
+                // Watch live updates
                 locationSubscriber = await Location.watchPositionAsync(
                     { accuracy: Location.Accuracy.High, distanceInterval: 2, timeInterval: 2000 },
                     (newLocation) => { setCurrentLocation(newLocation); }
@@ -242,6 +250,7 @@ const MainScreen = ({ navigation }) => {
         }
     };
 
+    // 2. Updated getMapRegion to safely check for location data
     const getMapRegion = () => {
         if (userIsTracking && currentLocation?.coords) {
             return {
@@ -408,7 +417,7 @@ const MainScreen = ({ navigation }) => {
                 <Button mode="contained" onPress={() => navigation.navigate('Suggest Add')} style={styles.actionButton} labelStyle={styles.actionButtonLabel}>
                     Add Suggest
                 </Button>
-                <Button mode="contained" onPress={() => navigation.navigate('Walk Group List')} style={styles.actionButton} labelStyle={styles.actionButtonLabel}>
+                <Button mode="contained" onPress={() => navigation.navigate('VolunteerDashboard')} style={styles.actionButton} labelStyle={styles.actionButtonLabel}>
                     Volunteer
                 </Button>
             </View>
