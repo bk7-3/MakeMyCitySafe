@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect } from "react";
 import { View, SafeAreaView, FlatList, TouchableOpacity, Alert, StyleSheet, Modal, ScrollView, TextInput } from "react-native";
 import { Text, Button, IconButton, Divider, ActivityIndicator } from "react-native-paper";
-import { collection, onSnapshot, doc, getDoc, addDoc, deleteDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, onSnapshot, doc, getDoc, addDoc, deleteDoc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import MapView, { Marker, Callout } from "react-native-maps";
 import * as Location from 'expo-location';
@@ -140,6 +140,27 @@ const MainScreen = ({ navigation }) => {
         });
         setCurrentLocation(initialLoc);
         setLoadingLocation(false);
+
+        // --- SAVE LAST KNOWN LOCATION ON LOGIN/MOUNT ---
+        const currentUser = auth.currentUser;
+        if (currentUser && initialLoc?.coords) {
+          try {
+            await setDoc(
+              doc(db, "users", currentUser.uid),
+              {
+                location: {
+                  latitude: initialLoc.coords.latitude,
+                  longitude: initialLoc.coords.longitude,
+                  lastUpdated: new Date().toISOString(),
+                },
+              },
+              { merge: true }
+            );
+          } catch (locErr) {
+            console.error("Failed to update user last location on login:", locErr);
+          }
+        }
+        // ----------------------------------------------
 
         locationSubscriber = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.High, distanceInterval: 2, timeInterval: 2000 },
@@ -563,6 +584,14 @@ const MainScreen = ({ navigation }) => {
             labelStyle={styles.actionButtonLabel}
           >
             Add Suggestion
+          </Button>
+          <Button 
+            mode="outlined" 
+            onPress={() => navigation.navigate('socialScreen')} 
+            style={styles.actionButton} 
+            labelStyle={styles.actionButtonLabel}
+          >
+            Social
           </Button>
         </View>
       </View>
