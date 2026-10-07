@@ -2,16 +2,21 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   View,
-  Text,
   TextInput,
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  SafeAreaView,
   Image,
   Alert,
   Modal,
+  StatusBar,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Text } from 'react-native-paper';
+import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker } from 'react-native-maps';
 import {
   collection,
@@ -26,8 +31,54 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 
+// ---------- Responsive helpers ----------
+const { height: SCREEN_H } = Dimensions.get('window');
+const isSmallDevice = SCREEN_H < 700;
+const isLargeDevice = SCREEN_H > 850;
+
+const scale = (small, normal, large) => {
+  if (isSmallDevice) return small;
+  if (isLargeDevice) return large;
+  return normal;
+};
+
+const SPACING = {
+  xs: scale(4, 6, 8),
+  sm: scale(8, 10, 12),
+  md: scale(12, 16, 20),
+  lg: scale(16, 20, 24),
+};
+
+// ---------- Colors ----------
+const COLORS = {
+  primary: '#000666',
+  primaryLight: '#F0F2FF',
+  background: '#F5F7FA',
+  surface: '#ffffff',
+  text: '#1a1c1c',
+  subtext: '#4A4A5A',
+  muted: '#8A8A9E',
+  border: '#E6E8EE',
+  inputBg: '#F9FAFC',
+  danger: '#D32F2F',
+  dangerLight: '#FFEBEE',
+  success: '#2E7D32',
+  successLight: '#E8F5E9',
+  warning: '#F57C00',
+  warningLight: '#FFF3E0',
+};
+
+// ---------- Tabs ----------
+const TABS = [
+  { key: 'search', label: 'Search', icon: 'search' },
+  { key: 'requests', label: 'Requests', icon: 'person-add' },
+  { key: 'friends', label: 'Friends', icon: 'people' },
+];
+
 const SocialScreen = ({ navigation }) => {
-  const [activeTab, setActiveTab] = useState('search'); // 'search' | 'requests' | 'friends'
+  const insets = useSafeAreaInsets();
+
+  const [activeTab, setActiveTab] = useState('search');
   const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,18 +91,19 @@ const SocialScreen = ({ navigation }) => {
   const [friendsDetails, setFriendsDetails] = useState([]);
   const [requestsDetails, setRequestsDetails] = useState([]);
 
-  // Map Modal state
+  // Map modal state
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState(null);
   const [friendLocation, setFriendLocation] = useState(null);
   const [loadingMap, setLoadingMap] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
 
-  // Real-time map location listener reference
   const mapUnsubscribeRef = useRef(null);
+  const [currentUserId, setCurrentUserId] = useState(
+    auth.currentUser?.uid ?? null
+  );
 
-  // Track auth via state so effects re-run once the session is restored
-  const [currentUserId, setCurrentUserId] = useState(auth.currentUser?.uid ?? null);
-
+  // ---------- Auth listener ----------
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((user) => {
       setCurrentUserId(user?.uid ?? null);
@@ -59,13 +111,11 @@ const SocialScreen = ({ navigation }) => {
     return unsub;
   }, []);
 
-  // -------------------------------------------------------------
-  // 1. Listen for current user's friends & request arrays
-  // -------------------------------------------------------------
+  // ---------- User doc listener (friends + requests arrays) ----------
   useEffect(() => {
     if (!currentUserId) return;
 
-    const userDocRef = doc(db, 'students', currentUserId);
+    const userDocRef = doc(db, 'users', currentUserId);
     const unsubscribe = onSnapshot(
       userDocRef,
       (snapshot) => {
@@ -84,7 +134,6 @@ const SocialScreen = ({ navigation }) => {
     return () => unsubscribe();
   }, [currentUserId]);
 
-  // Helper function to chunk array for Firestore 'in' query limit (30 max)
   const chunkArray = (arr, size) => {
     const chunks = [];
     for (let i = 0; i < arr.length; i += size) {
@@ -93,30 +142,29 @@ const SocialScreen = ({ navigation }) => {
     return chunks;
   };
 
-  // -------------------------------------------------------------
-  // 2. Hydrate details for Friends List & Incoming Requests
-  // -------------------------------------------------------------
+  // ---------- Hydrate friend & request details ----------
   useEffect(() => {
     const fetchUsersByIds = async (ids, setter) => {
       if (!ids || ids.length === 0) {
         setter([]);
         return;
       }
-
       try {
         const idChunks = chunkArray(ids, 30);
         let fetchedList = [];
 
         for (const chunk of idChunks) {
           const q = query(
-            collection(db, 'students'),
+            collection(db, 'users'),
             where('__name__', 'in', chunk)
           );
           const snapshot = await getDocs(q);
-          const docsData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          const docsData = snapshot.docs.map((d) => ({
+            id: d.id,
+            ...d.data(),
+          }));
           fetchedList = [...fetchedList, ...docsData];
         }
-
         setter(fetchedList);
       } catch (err) {
         console.error('Error fetching user profiles:', err);
@@ -130,7 +178,7 @@ const SocialScreen = ({ navigation }) => {
     }
   }, [activeTab, myFriends, incomingRequests]);
 
-  // Clean up map subscription on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (mapUnsubscribeRef.current) {
@@ -139,9 +187,7 @@ const SocialScreen = ({ navigation }) => {
     };
   }, []);
 
-  // -------------------------------------------------------------
-  // 3. Search Logic
-  // -------------------------------------------------------------
+  // ---------- Search ----------
   const handleSearch = async () => {
     const trimmedQuery = searchText.trim();
     if (!trimmedQuery) return;
@@ -152,16 +198,16 @@ const SocialScreen = ({ navigation }) => {
     const formattedQuery = trimmedQuery.toLowerCase();
 
     try {
-      const studentsRef = collection(db, 'students');
+      const usersRef = collection(db, 'users');
 
       const qExact = query(
-        studentsRef,
+        usersRef,
         where('name', '>=', trimmedQuery),
         where('name', '<=', trimmedQuery + '\uf8ff')
       );
 
       const qLowercase = query(
-        studentsRef,
+        usersRef,
         where('name_lowercase', '>=', formattedQuery),
         where('name_lowercase', '<=', formattedQuery + '\uf8ff')
       );
@@ -188,7 +234,7 @@ const SocialScreen = ({ navigation }) => {
       setResults(Array.from(usersMap.values()));
     } catch (error) {
       console.error('Search error:', error);
-      Alert.alert('Error', 'Failed to search users. Please check your connection.');
+      Alert.alert('Error', 'Failed to search users. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -200,19 +246,15 @@ const SocialScreen = ({ navigation }) => {
     setHasSearched(false);
   };
 
-  // -------------------------------------------------------------
-  // 4. Friend Request Handlers
-  // -------------------------------------------------------------
+  // ---------- Friend requests ----------
   const sendFriendRequest = async (targetUserId) => {
     try {
-      await updateDoc(doc(db, 'students', currentUserId), {
+      await updateDoc(doc(db, 'users', currentUserId), {
         outgoingRequests: arrayUnion(targetUserId),
       });
-
-      await updateDoc(doc(db, 'students', targetUserId), {
+      await updateDoc(doc(db, 'users', targetUserId), {
         incomingRequests: arrayUnion(currentUserId),
       });
-
       Alert.alert('Success', 'Friend request sent!');
     } catch (err) {
       console.error('Error sending friend request:', err);
@@ -222,8 +264,8 @@ const SocialScreen = ({ navigation }) => {
 
   const acceptFriendRequest = async (targetUserId) => {
     try {
-      const myRef = doc(db, 'students', currentUserId);
-      const friendRef = doc(db, 'students', targetUserId);
+      const myRef = doc(db, 'users', currentUserId);
+      const friendRef = doc(db, 'users', targetUserId);
 
       await updateDoc(myRef, {
         friends: arrayUnion(targetUserId),
@@ -244,12 +286,10 @@ const SocialScreen = ({ navigation }) => {
 
   const rejectFriendRequest = async (targetUserId) => {
     try {
-      await updateDoc(doc(db, 'students', currentUserId), {
+      await updateDoc(doc(db, 'users', currentUserId), {
         incomingRequests: arrayRemove(targetUserId),
       });
-
-      // Fixed: remove MY id from the sender's outgoing list
-      await updateDoc(doc(db, 'students', targetUserId), {
+      await updateDoc(doc(db, 'users', targetUserId), {
         outgoingRequests: arrayRemove(currentUserId),
       });
     } catch (err) {
@@ -268,10 +308,10 @@ const SocialScreen = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await updateDoc(doc(db, 'students', currentUserId), {
+              await updateDoc(doc(db, 'users', currentUserId), {
                 friends: arrayRemove(targetUserId),
               });
-              await updateDoc(doc(db, 'students', targetUserId), {
+              await updateDoc(doc(db, 'users', targetUserId), {
                 friends: arrayRemove(currentUserId),
               });
             } catch (err) {
@@ -284,13 +324,12 @@ const SocialScreen = ({ navigation }) => {
     );
   };
 
-  // -------------------------------------------------------------
-  // 5. Map Modal Handlers (reads users/{id}.location saved by MainScreen)
-  // -------------------------------------------------------------
+  // ---------- Map modal ----------
   const handleOpenMap = (friend) => {
     setSelectedFriend(friend);
     setIsModalVisible(true);
     setLoadingMap(true);
+    setMapReady(false);
 
     if (mapUnsubscribeRef.current) {
       mapUnsubscribeRef.current();
@@ -302,14 +341,15 @@ const SocialScreen = ({ navigation }) => {
       friendDocRef,
       (snapshot) => {
         setLoadingMap(false);
-
-        // MainScreen saves the location nested under `location`
         const loc = snapshot.exists() ? snapshot.data().location : null;
 
         if (loc?.latitude != null && loc?.longitude != null) {
-          // Works with an ISO string (current) or a Firestore Timestamp
           const raw = loc.lastUpdated;
-          const lastUpdated = raw?.toDate ? raw.toDate() : raw ? new Date(raw) : null;
+          const lastUpdated = raw?.toDate
+            ? raw.toDate()
+            : raw
+            ? new Date(raw)
+            : null;
 
           setFriendLocation({
             latitude: Number(loc.latitude),
@@ -338,11 +378,10 @@ const SocialScreen = ({ navigation }) => {
     setIsModalVisible(false);
     setSelectedFriend(null);
     setFriendLocation(null);
+    setMapReady(false);
   };
 
-  // -------------------------------------------------------------
-  // 6. Render Items
-  // -------------------------------------------------------------
+  // ---------- Renders ----------
   const renderSearchResultItem = ({ item }) => {
     const isFriend = myFriends.includes(item.id);
     const isOutgoing = outgoingRequests.includes(item.id);
@@ -356,22 +395,38 @@ const SocialScreen = ({ navigation }) => {
           </Text>
         </View>
         <View style={styles.userInfo}>
-          <Text style={styles.userName}>{item.name || 'Unnamed Student'}</Text>
-          {item.city ? <Text style={styles.userDetails}>📍 {item.city}</Text> : null}
+          <Text style={styles.userName} numberOfLines={1}>
+            {item.name || 'Unnamed Student'}
+          </Text>
+          {item.city ? (
+            <View style={styles.metaRow}>
+              <Ionicons
+                name="location-outline"
+                size={12}
+                color={COLORS.muted}
+              />
+              <Text style={styles.userDetails} numberOfLines={1}>
+                {item.city}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {isFriend ? (
           <View style={styles.badgeSuccess}>
-            <Text style={styles.badgeText}>Friends</Text>
+            <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
+            <Text style={styles.badgeSuccessText}>Friends</Text>
           </View>
         ) : isOutgoing ? (
           <View style={styles.badgePending}>
-            <Text style={styles.badgeTextPending}>Pending</Text>
+            <Ionicons name="time" size={12} color={COLORS.warning} />
+            <Text style={styles.badgePendingText}>Pending</Text>
           </View>
         ) : isIncoming ? (
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={() => acceptFriendRequest(item.id)}
+            activeOpacity={0.85}
           >
             <Text style={styles.actionBtnText}>Accept</Text>
           </TouchableOpacity>
@@ -379,8 +434,10 @@ const SocialScreen = ({ navigation }) => {
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={() => sendFriendRequest(item.id)}
+            activeOpacity={0.85}
           >
-            <Text style={styles.actionBtnText}>+ Add</Text>
+            <Ionicons name="person-add" size={14} color="#fff" />
+            <Text style={styles.actionBtnText}>Add</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -395,22 +452,38 @@ const SocialScreen = ({ navigation }) => {
         </Text>
       </View>
       <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name || 'Unnamed Student'}</Text>
-        {item.city ? <Text style={styles.userDetails}>📍 {item.city}</Text> : null}
+        <Text style={styles.userName} numberOfLines={1}>
+          {item.name || 'Unnamed Student'}
+        </Text>
+        {item.city ? (
+          <View style={styles.metaRow}>
+            <Ionicons
+              name="location-outline"
+              size={12}
+              color={COLORS.muted}
+            />
+            <Text style={styles.userDetails} numberOfLines={1}>
+              {item.city}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.friendActions}>
         <TouchableOpacity
           style={styles.mapBtn}
           onPress={() => handleOpenMap(item)}
+          activeOpacity={0.85}
         >
-          <Text style={styles.mapBtnText}>View Map</Text>
+          <Ionicons name="map" size={14} color="#fff" />
+          <Text style={styles.mapBtnText}>Map</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.removeBtn}
           onPress={() => removeFriend(item.id, item.name)}
+          activeOpacity={0.85}
         >
-          <Text style={styles.removeBtnText}>✕</Text>
+          <Ionicons name="trash-outline" size={16} color={COLORS.danger} />
         </TouchableOpacity>
       </View>
     </View>
@@ -424,81 +497,124 @@ const SocialScreen = ({ navigation }) => {
         </Text>
       </View>
       <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name || 'Unnamed Student'}</Text>
+        <Text style={styles.userName} numberOfLines={1}>
+          {item.name || 'Unnamed Student'}
+        </Text>
         <Text style={styles.userDetails}>Wants to share location</Text>
       </View>
 
       <View style={styles.requestActions}>
         <TouchableOpacity
-          style={styles.actionBtn}
+          style={styles.acceptSmallBtn}
           onPress={() => acceptFriendRequest(item.id)}
+          activeOpacity={0.85}
         >
-          <Text style={styles.actionBtnText}>Accept</Text>
+          <Ionicons name="checkmark" size={16} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.rejectBtn}
+          style={styles.rejectSmallBtn}
           onPress={() => rejectFriendRequest(item.id)}
+          activeOpacity={0.85}
         >
-          <Text style={styles.rejectBtnText}>Decline</Text>
+          <Ionicons name="close" size={16} color={COLORS.danger} />
         </TouchableOpacity>
       </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerBrand}>
-          <Image
-            source={require('../assets/logo1.png')}
-            style={styles.headerIcon}
-            resizeMode="contain"
-          />
-          <Text style={styles.headerTitle}>MakeMyCitySafe</Text>
+        <TouchableOpacity
+          onPress={() =>
+            navigation.canGoBack()
+              ? navigation.goBack()
+              : navigation.navigate('Main')
+          }
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.headerBtn}
+        >
+          <Ionicons name="chevron-back" size={26} color={COLORS.primary} />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Social</Text>
+          <Text style={styles.headerSubtitle}>
+            {myFriends.length} friend{myFriends.length === 1 ? '' : 's'}
+          </Text>
+        </View>
+        <View style={styles.headerBtn} />
+      </View>
+
+      {/* Segmented tabs */}
+      <View style={styles.tabsWrapper}>
+        <View style={styles.tabContainer}>
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            const badge =
+              tab.key === 'requests'
+                ? incomingRequests.length
+                : tab.key === 'friends'
+                ? myFriends.length
+                : 0;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.tab, isActive && styles.tabActive]}
+                onPress={() => setActiveTab(tab.key)}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={tab.icon}
+                  size={14}
+                  color={isActive ? COLORS.primary : COLORS.muted}
+                />
+                <Text
+                  style={[styles.tabText, isActive && styles.tabTextActive]}
+                >
+                  {tab.label}
+                </Text>
+                {badge > 0 && (
+                  <View
+                    style={[
+                      styles.tabBadge,
+                      isActive && styles.tabBadgeActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.tabBadgeText,
+                        isActive && { color: '#fff' },
+                      ]}
+                    >
+                      {badge}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'search' && styles.activeTab]}
-          onPress={() => setActiveTab('search')}
-        >
-          <Text style={[styles.tabText, activeTab === 'search' && styles.activeTabText]}>
-            Search
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'requests' && styles.activeTab]}
-          onPress={() => setActiveTab('requests')}
-        >
-          <Text style={[styles.tabText, activeTab === 'requests' && styles.activeTabText]}>
-            Requests {incomingRequests.length > 0 ? `(${incomingRequests.length})` : ''}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'friends' && styles.activeTab]}
-          onPress={() => setActiveTab('friends')}
-        >
-          <Text style={[styles.tabText, activeTab === 'friends' && styles.activeTabText]}>
-            Friends ({myFriends.length})
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Main Content */}
-      <View style={styles.container}>
+      {/* Content */}
+      <View style={styles.content}>
         {activeTab === 'search' && (
           <>
             <View style={styles.searchContainer}>
-              <View style={styles.searchInputContainer}>
+              <View style={styles.searchInputWrapper}>
+                <Ionicons
+                  name="search"
+                  size={16}
+                  color={COLORS.muted}
+                  style={styles.searchIcon}
+                />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Search students by name..."
-                  placeholderTextColor="#767683"
+                  placeholder="Search users by name..."
+                  placeholderTextColor={COLORS.muted}
                   value={searchText}
                   onChangeText={setSearchText}
                   autoCapitalize="none"
@@ -506,8 +622,15 @@ const SocialScreen = ({ navigation }) => {
                   onSubmitEditing={handleSearch}
                 />
                 {searchText.length > 0 && (
-                  <TouchableOpacity style={styles.clearSearchBtn} onPress={clearSearch}>
-                    <Text style={styles.clearSearchBtnText}>✕</Text>
+                  <TouchableOpacity
+                    onPress={clearSearch}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name="close-circle"
+                      size={18}
+                      color={COLORS.muted}
+                    />
                   </TouchableOpacity>
                 )}
               </View>
@@ -516,28 +639,45 @@ const SocialScreen = ({ navigation }) => {
                 onPress={handleSearch}
                 activeOpacity={0.85}
               >
-                <Text style={styles.searchBtnText}>Search</Text>
+                <Text style={styles.searchBtnText}>Go</Text>
               </TouchableOpacity>
             </View>
 
             {loading ? (
-              <ActivityIndicator size="large" color="#000666" style={styles.loader} />
+              <View style={styles.centered}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+              </View>
             ) : (
               <FlatList
                 data={results}
                 keyExtractor={(item) => item.id}
                 renderItem={renderSearchResultItem}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={[
+                  styles.listContent,
+                  results.length === 0 && styles.listContentEmpty,
+                ]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
                 ListEmptyComponent={
-                  hasSearched ? (
-                    <Text style={styles.emptyText}>
-                      No students found matching "{searchText}"
+                  <View style={styles.emptyContainer}>
+                    <View style={styles.emptyIconBox}>
+                      <Ionicons
+                        name={hasSearched ? 'search' : 'people-outline'}
+                        size={40}
+                        color={COLORS.muted}
+                      />
+                    </View>
+                    <Text style={styles.emptyTitle}>
+                      {hasSearched
+                        ? 'No users found'
+                        : 'Find new friends'}
                     </Text>
-                  ) : (
-                    <Text style={styles.emptyText}>
-                      Search for students by entering their name above.
+                    <Text style={styles.emptySubtext}>
+                      {hasSearched
+                        ? `No one matches "${searchText}"`
+                        : 'Search by name to add friends and share locations.'}
                     </Text>
-                  )
+                  </View>
                 }
               />
             )}
@@ -549,9 +689,25 @@ const SocialScreen = ({ navigation }) => {
             data={requestsDetails}
             keyExtractor={(item) => item.id}
             renderItem={renderRequestItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[
+              styles.listContent,
+              requestsDetails.length === 0 && styles.listContentEmpty,
+            ]}
+            showsVerticalScrollIndicator={false}
             ListEmptyComponent={
-              <Text style={styles.emptyText}>No pending friend requests.</Text>
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconBox}>
+                  <Ionicons
+                    name="person-add-outline"
+                    size={40}
+                    color={COLORS.muted}
+                  />
+                </View>
+                <Text style={styles.emptyTitle}>No pending requests</Text>
+                <Text style={styles.emptySubtext}>
+                  Friend requests you receive will appear here.
+                </Text>
+              </View>
             }
           />
         )}
@@ -561,59 +717,125 @@ const SocialScreen = ({ navigation }) => {
             data={friendsDetails}
             keyExtractor={(item) => item.id}
             renderItem={renderFriendItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[
+              styles.listContent,
+              friendsDetails.length === 0 && styles.listContentEmpty,
+            ]}
+            showsVerticalScrollIndicator={false}
             ListEmptyComponent={
-              <Text style={styles.emptyText}>
-                You haven't added any friends yet.
-              </Text>
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconBox}>
+                  <Ionicons
+                    name="people-outline"
+                    size={40}
+                    color={COLORS.muted}
+                  />
+                </View>
+                <Text style={styles.emptyTitle}>No friends yet</Text>
+                <Text style={styles.emptySubtext}>
+                  Add friends from the Search tab to share locations.
+                </Text>
+              </View>
             }
           />
         )}
       </View>
 
-      {/* Location Modal */}
+      {/* Location modal */}
       <Modal
         visible={isModalVisible}
         animationType="slide"
-        transparent={true}
+        transparent
+        statusBarTranslucent
         onRequestClose={handleCloseMap}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            {/* Modal Header */}
+          <View
+            style={[
+              styles.modalContent,
+              { paddingBottom: insets.bottom + SPACING.md },
+            ]}
+          >
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {selectedFriend?.name || 'Friend'}'s Location
-              </Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleCloseMap}>
-                <Text style={styles.closeBtnText}>✕</Text>
+              <View style={styles.modalTitleRow}>
+                <View style={styles.modalAvatar}>
+                  <Text style={styles.modalAvatarText}>
+                    {selectedFriend?.name
+                      ? selectedFriend.name.charAt(0).toUpperCase()
+                      : '?'}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle} numberOfLines={1}>
+                    {selectedFriend?.name || 'Friend'}
+                  </Text>
+                  <Text style={styles.modalSubtitle}>
+                    {friendLocation
+                      ? 'Live location'
+                      : 'Awaiting location...'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={handleCloseMap}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={22} color={COLORS.text} />
               </TouchableOpacity>
             </View>
 
-            {/* Content Area */}
-            {loadingMap ? (
-              <View style={styles.centerContainer}>
-                <ActivityIndicator size="large" color="#000666" />
-              </View>
-            ) : friendLocation ? (
-              <MapView style={styles.modalMap} region={friendLocation}>
-                <Marker
-                  coordinate={{
-                    latitude: friendLocation.latitude,
-                    longitude: friendLocation.longitude,
-                  }}
-                  title={selectedFriend?.name || 'Friend'}
-                  description={
-                    friendLocation.lastUpdated
-                      ? `Last updated: ${friendLocation.lastUpdated.toLocaleString()}`
-                      : 'Last known location'
-                  }
+            <View
+              style={styles.modalMapWrapper}
+              onLayout={() => setMapReady(true)}
+            >
+              {loadingMap ? (
+                <View style={styles.centered}>
+                  <ActivityIndicator size="large" color={COLORS.primary} />
+                  <Text style={styles.loadingText}>Loading location...</Text>
+                </View>
+              ) : friendLocation && mapReady ? (
+                <MapView style={styles.modalMap} region={friendLocation}>
+                  <Marker
+                    coordinate={{
+                      latitude: friendLocation.latitude,
+                      longitude: friendLocation.longitude,
+                    }}
+                    title={selectedFriend?.name || 'Friend'}
+                    description={
+                      friendLocation.lastUpdated
+                        ? `Updated: ${friendLocation.lastUpdated.toLocaleString()}`
+                        : 'Last known location'
+                    }
+                    pinColor={COLORS.primary}
+                  />
+                </MapView>
+              ) : (
+                <View style={styles.centered}>
+                  <View style={styles.emptyIconBox}>
+                    <Ionicons
+                      name="location-outline"
+                      size={40}
+                      color={COLORS.muted}
+                    />
+                  </View>
+                  <Text style={styles.emptyTitle}>No location available</Text>
+                  <Text style={styles.emptySubtext}>
+                    This friend hasn't shared a location yet.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {friendLocation?.lastUpdated && (
+              <View style={styles.lastUpdatedRow}>
+                <Ionicons
+                  name="time-outline"
+                  size={14}
+                  color={COLORS.muted}
                 />
-              </MapView>
-            ) : (
-              <View style={styles.centerContainer}>
-                <Text style={styles.noLocationText}>
-                  No location data available for this student.
+                <Text style={styles.lastUpdatedText}>
+                  Updated {friendLocation.lastUpdated.toLocaleString()}
                 </Text>
               </View>
             )}
@@ -624,291 +846,393 @@ const SocialScreen = ({ navigation }) => {
   );
 };
 
+export default SocialScreen;
+
+// ---------- Styles ----------
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f9f9f9',
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
+
+  // Header
   header: {
-    height: 56,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e2e2',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  headerBrand: {
-    flexDirection: 'row',
+  headerBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
   },
-  headerIcon: {
-    width: 28,
-    height: 28,
-  },
+  headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: {
-    fontSize: 18,
+    fontSize: scale(16, 18, 20),
     fontWeight: '700',
-    color: '#000666',
-    letterSpacing: -0.5,
+    color: COLORS.primary,
+  },
+  headerSubtitle: {
+    fontSize: scale(10, 11, 12),
+    color: COLORS.muted,
+    marginTop: 1,
+    fontWeight: '500',
+  },
+
+  // Tabs
+  tabsWrapper: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e2e2',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    justifyContent: 'center',
+    paddingVertical: scale(8, 10, 12),
+    borderRadius: 8,
+    gap: 5,
   },
-  activeTab: {
-    borderBottomColor: '#000666',
+  tabActive: {
+    backgroundColor: COLORS.primaryLight,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: scale(11, 12, 13),
     fontWeight: '600',
-    color: '#767683',
+    color: COLORS.muted,
   },
-  activeTabText: {
-    color: '#000666',
-    fontWeight: '700',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#f9f9f9',
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 8,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e2e2',
-  },
-  searchInputContainer: {
-    flex: 1,
-    position: 'relative',
-    justifyContent: 'center',
-  },
-  searchInput: {
-    height: 48,
-    backgroundColor: '#f9f9f9',
+  tabTextActive: { color: COLORS.primary, fontWeight: '700' },
+  tabBadge: {
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#c6c5d4',
-    paddingLeft: 12,
-    paddingRight: 36,
-    fontSize: 16,
-    color: '#1a1c1c',
-  },
-  clearSearchBtn: {
-    position: 'absolute',
-    right: 10,
-    padding: 4,
-  },
-  clearSearchBtnText: {
-    color: '#767683',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  searchBtn: {
-    height: 48,
-    paddingHorizontal: 20,
-    backgroundColor: '#000666',
-    borderRadius: 8,
+    backgroundColor: '#E0E0E0',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 2,
+  },
+  tabBadgeActive: { backgroundColor: COLORS.primary },
+  tabBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: COLORS.muted,
+  },
+
+  // Content
+  content: { flex: 1, marginTop: SPACING.sm },
+
+  // Search
+  searchContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  searchInputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    paddingVertical: scale(6, 8, 10),
+  },
+  searchIcon: { marginRight: 8 },
+  searchInput: {
+    flex: 1,
+    fontSize: scale(13, 14, 15),
+    color: COLORS.text,
+    paddingVertical: 4,
+  },
+  searchBtn: {
+    paddingHorizontal: SPACING.md,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   searchBtnText: {
-    color: '#ffffff',
+    color: '#fff',
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: scale(13, 14, 15),
   },
-  loader: {
-    marginTop: 40,
-  },
+
+  // List
   listContent: {
-    padding: 16,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.lg,
   },
+  listContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  // Card
   userCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderRadius: 10,
+    backgroundColor: '#fff',
+    padding: SPACING.sm,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    marginBottom: 10,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.sm,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1a237e',
+    width: scale(40, 44, 48),
+    height: scale(40, 44, 48),
+    borderRadius: scale(20, 22, 24),
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: SPACING.sm,
   },
   avatarText: {
-    color: '#ffffff',
-    fontSize: 18,
+    color: '#fff',
+    fontSize: scale(16, 17, 18),
     fontWeight: '700',
   },
-  userInfo: {
-    flex: 1,
-  },
+  userInfo: { flex: 1, marginRight: SPACING.sm },
   userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1c1c',
+    fontSize: scale(13, 14, 15),
+    fontWeight: '700',
+    color: COLORS.text,
   },
-  userDetails: {
-    fontSize: 13,
-    color: '#454652',
-    marginTop: 2,
-  },
-  friendActions: {
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 3,
+    marginTop: 3,
   },
+  userDetails: {
+    fontSize: scale(10, 11, 12),
+    color: COLORS.muted,
+    flexShrink: 1,
+  },
+
+  // Buttons on cards
   actionBtn: {
-    backgroundColor: '#000666',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
   },
   actionBtnText: {
-    color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 13,
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: scale(11, 12, 13),
   },
-  rejectBtn: {
-    backgroundColor: '#f1f1f1',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginLeft: 6,
-  },
-  rejectBtnText: {
-    color: '#d32f2f',
-    fontWeight: '600',
-    fontSize: 13,
-  },
+
+  friendActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   mapBtn: {
-    backgroundColor: '#1a237e',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
   },
   mapBtnText: {
-    color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 13,
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: scale(11, 12, 13),
   },
   removeBtn: {
-    backgroundColor: '#ffebee',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 6,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: COLORS.dangerLight,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  removeBtnText: {
-    color: '#d32f2f',
-    fontWeight: 'bold',
-    fontSize: 13,
+
+  requestActions: { flexDirection: 'row', gap: 6 },
+  acceptSmallBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
+  rejectSmallBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: COLORS.dangerLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // Badges
   badgeSuccess: {
-    backgroundColor: '#e8f5e9',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.successLight,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+    paddingVertical: 5,
+    borderRadius: 10,
   },
-  badgeText: {
-    color: '#2e7d32',
-    fontWeight: '600',
-    fontSize: 12,
+  badgeSuccessText: {
+    color: COLORS.success,
+    fontWeight: '700',
+    fontSize: scale(10, 11, 12),
   },
   badgePending: {
-    backgroundColor: '#fff3e0',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  badgeTextPending: {
-    color: '#ef6c00',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  requestActions: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.warningLight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
   },
-  emptyText: {
+  badgePendingText: {
+    color: COLORS.warning,
+    fontWeight: '700',
+    fontSize: scale(10, 11, 12),
+  },
+
+  // Empty
+  emptyContainer: {
+    alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.xl,
+  },
+  emptyIconBox: {
+    width: scale(80, 90, 100),
+    height: scale(80, 90, 100),
+    borderRadius: scale(20, 22, 24),
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  emptyTitle: {
+    fontSize: scale(15, 16, 17),
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: scale(12, 13, 14),
+    color: COLORS.muted,
     textAlign: 'center',
-    color: '#767683',
-    marginTop: 40,
-    fontSize: 15,
+    lineHeight: scale(18, 19, 20),
   },
+
+  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
+    justifyContent: 'flex-end',
   },
   modalContent: {
-    width: '100%',
-    height: '65%',
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    overflow: 'hidden',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e2e2',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.sm,
+  },
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: SPACING.sm,
+  },
+  modalAvatar: {
+    width: scale(40, 44, 48),
+    height: scale(40, 44, 48),
+    borderRadius: scale(20, 22, 24),
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalAvatarText: {
+    color: '#fff',
+    fontSize: scale(16, 17, 18),
+    fontWeight: '700',
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: scale(15, 16, 17),
     fontWeight: '700',
-    color: '#000666',
+    color: COLORS.text,
+  },
+  modalSubtitle: {
+    fontSize: scale(11, 12, 13),
+    color: COLORS.muted,
+    marginTop: 1,
   },
   closeBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#f1f1f1',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  closeBtnText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#454652',
+  modalMapWrapper: {
+    height: scale(320, 380, 420),
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    marginBottom: SPACING.sm,
   },
-  modalMap: {
-    flex: 1,
-    width: '100%',
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  modalMap: { flex: 1, width: '100%' },
+  lastUpdatedRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
+    justifyContent: 'center',
+    gap: 6,
+    paddingBottom: SPACING.sm,
   },
-  noLocationText: {
-    color: '#767683',
-    fontSize: 15,
-    textAlign: 'center',
+  lastUpdatedText: {
+    fontSize: scale(11, 12, 13),
+    color: COLORS.muted,
+    fontWeight: '500',
+  },
+  loadingText: {
+    marginTop: 10,
+    color: COLORS.muted,
+    fontSize: scale(12, 13, 14),
+    fontWeight: '500',
   },
 });
-
-export default SocialScreen;
