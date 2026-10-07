@@ -1,3 +1,6 @@
+//This screen is for school staff
+
+
 import { StyleSheet, View, SafeAreaView} from 'react-native'
 import {useState} from 'react'
 import {Text, IconButton, Divider, TextInput, Button} from 'react-native-paper'
