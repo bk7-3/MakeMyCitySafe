@@ -2,51 +2,129 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   StyleSheet,
   View,
-  SafeAreaView,
   FlatList,
   TouchableOpacity,
-  Text,
   TextInput,
   ScrollView,
   StatusBar,
   RefreshControl,
   Alert,
+  Dimensions,
+  ActivityIndicator,
 } from 'react-native';
-import { IconButton, Divider, FAB } from 'react-native-paper';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Text } from 'react-native-paper';
+import { FAB } from 'react-native-paper';
+import { Ionicons } from '@expo/vector-icons';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '../firebase';
 
-// THEME 
+// ---------- Responsive helpers ----------
+const { height: SCREEN_H } = Dimensions.get('window');
+const isSmallDevice = SCREEN_H < 700;
+const isLargeDevice = SCREEN_H > 850;
+
+const scale = (small, normal, large) => {
+  if (isSmallDevice) return small;
+  if (isLargeDevice) return large;
+  return normal;
+};
+
+const SPACING = {
+  xs: scale(4, 6, 8),
+  sm: scale(8, 10, 12),
+  md: scale(12, 16, 20),
+  lg: scale(16, 20, 24),
+};
+
+// ---------- Colors ----------
 const COLORS = {
   primary: '#000666',
-  primaryContainer: '#1a237e',
-  background: '#f9f9f9',
+  primaryLight: '#F0F2FF',
+  background: '#F5F7FA',
   surface: '#ffffff',
   text: '#1a1c1c',
-  placeholder: '#454652',
-  border: '#c6c5d4',
+  subtext: '#4A4A5A',
+  muted: '#8A8A9E',
+  border: '#E6E8EE',
+  inputBg: '#F9FAFC',
   white: '#ffffff',
 };
 
-// CATEGORY CONFIG
+// ---------- Category config ----------
+// Each category has: label, Ionicons icon name, accent color, light background
 const CATEGORIES = {
-  infrastructure: { label: 'Infrastructure', icon: '🏗️', color: '#e65100', bg: '#fff3e0' },
-  construction:  { label: 'Construction',  icon: '🚧', color: '#2e7d32', bg: '#e8f5e9' },
-  safety:        { label: 'Safety Hazard',  icon: '⚠️', color: '#ba1a1a', bg: '#ffdad6' },
-  lighting:      { label: 'Poor Lighting',  icon: '💡', color: '#f9a825', bg: '#fff9c4' },
-  other:         { label: 'Other',          icon: '📌', color: '#454652', bg: '#f0f0f0' },
+  infrastructure: {
+    label: 'Infrastructure',
+    icon: 'construct',
+    color: '#E65100',
+    bg: '#FFF3E0',
+  },
+  construction: {
+    label: 'Construction',
+    icon: 'hammer',
+    color: '#2E7D32',
+    bg: '#E8F5E9',
+  },
+  safety: {
+    label: 'Safety Hazard',
+    icon: 'warning',
+    color: '#BA1A1A',
+    bg: '#FFEBEE',
+  },
+  lighting: {
+    label: 'Poor Lighting',
+    icon: 'bulb',
+    color: '#F9A825',
+    bg: '#FFF9C4',
+  },
+  other: {
+    label: 'Other',
+    icon: 'pricetag',
+    color: '#454652',
+    bg: '#F0F2FF',
+  },
 };
 
 const STATUS_CONFIG = {
-  'reported':    { label: 'Reported',    color: '#e65100', bg: '#fff3e0' },
-  'submitted':   { label: 'Submitted',   color: '#e65100', bg: '#fff3e0' },
-  'in-progress': { label: 'In Progress', color: '#2e7d32', bg: '#e8f5e9' },
-  'resolved':    { label: 'Resolved',    color: '#00695c', bg: '#e0f2f1' },
+  reported: {
+    label: 'Reported',
+    color: '#E65100',
+    bg: '#FFF3E0',
+    icon: 'alert-circle',
+  },
+  submitted: {
+    label: 'Submitted',
+    color: '#E65100',
+    bg: '#FFF3E0',
+    icon: 'paper-plane',
+  },
+  'in-progress': {
+    label: 'In Progress',
+    color: '#2E7D32',
+    bg: '#E8F5E9',
+    icon: 'time',
+  },
+  resolved: {
+    label: 'Resolved',
+    color: '#00695C',
+    bg: '#E0F2F1',
+    icon: 'checkmark-circle',
+  },
 };
 
-// MAIN COMPONENT
+const STATUS_FILTERS = [
+  { label: 'All', value: 'all' },
+  { label: 'Reported', value: 'reported' },
+  { label: 'Submitted', value: 'submitted' },
+  { label: 'In Progress', value: 'in-progress' },
+  { label: 'Resolved', value: 'resolved' },
+];
+
 const SuggestListScreen = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
+
   const [suggestions, setSuggestions] = useState([]);
   const [search, setSearch] = useState('');
   const [activeStatus, setActiveStatus] = useState('all');
@@ -55,31 +133,27 @@ const SuggestListScreen = ({ navigation }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Listen for auth changes
+  // -------- Auth listener --------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log('Auth state changed:', user ? user.uid : 'No user');
       setCurrentUser(user);
     });
     return unsubscribe;
   }, []);
 
-  // Fetch suggestions with refresh capability
+  // -------- Fetch suggestions --------
   const fetchSuggestions = useCallback(async () => {
     try {
-      console.log('Fetching suggestions from Firestore...');
-      const q = query(collection(db, 'suggestions'), orderBy('reportDateTime', 'desc'));
+      const q = query(
+        collection(db, 'suggestions'),
+        orderBy('reportDateTime', 'desc')
+      );
       const snapshot = await getDocs(q);
-      const list = snapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log('Document:', doc.id, data);
-        return { id: doc.id, ...data };
-      });
-      console.log('Total suggestions fetched:', list.length);
+      const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       setSuggestions(list);
     } catch (error) {
       console.error('Error fetching suggestions:', error);
-      Alert.alert('Error', 'Failed to load reports: ' + error.message);
+      Alert.alert('Error', 'Failed to load reports.');
     } finally {
       setLoading(false);
     }
@@ -89,7 +163,7 @@ const SuggestListScreen = ({ navigation }) => {
     fetchSuggestions();
   }, [fetchSuggestions]);
 
-  // Refresh when screen comes into focus
+  // Refresh when screen gets focus
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchSuggestions();
@@ -97,119 +171,209 @@ const SuggestListScreen = ({ navigation }) => {
     return unsubscribe;
   }, [navigation, fetchSuggestions]);
 
-  // Pull-to-refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchSuggestions();
     setRefreshing(false);
   }, [fetchSuggestions]);
 
-  // Filter and search
-  const filtered = suggestions.filter(item => {
-    const query = search.toLowerCase();
+  // -------- Filtering --------
+  const filtered = suggestions.filter((item) => {
+    const q = search.toLowerCase();
     const matchesSearch =
       !search ||
-      (item.description || '').toLowerCase().includes(query) ||
-      (item.reportedByName || item.reportedBy || '').toLowerCase().includes(query) ||
-      (item.location || '').toLowerCase().includes(query);
+      (item.description || '').toLowerCase().includes(q) ||
+      (item.reportedByName || item.reportedBy || '').toLowerCase().includes(q) ||
+      (item.location || '').toLowerCase().includes(q);
 
     if (!matchesSearch) return false;
     if (activeStatus !== 'all' && item.status !== activeStatus) return false;
     if (activeCategory !== 'all' && item.category !== activeCategory) return false;
-
     return true;
   });
 
-  // Render a single report card
+  // -------- Render card --------
   const renderItem = ({ item }) => {
     const cat = CATEGORIES[item.category] || CATEGORIES.other;
-    const status = STATUS_CONFIG[item.status] || { label: item.status || 'Unknown', color: '#454652', bg: '#f0f0f0' };
+    const status =
+      STATUS_CONFIG[item.status] || {
+        label: item.status || 'Unknown',
+        color: '#454652',
+        bg: '#F0F2FF',
+        icon: 'help-circle',
+      };
     const isOwn = currentUser && item.reportedBy === currentUser.uid;
 
     const formattedDate = item.reportDateTime?.toDate
       ? item.reportDateTime.toDate().toLocaleDateString('en-US', {
-          month: 'short', day: 'numeric', year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
         })
       : '';
 
     return (
       <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => {
-          console.log('Navigating to detail with item:', item);
-          navigation.navigate('Suggest Detail', { suggestion: item });
-        }}
+        activeOpacity={0.85}
+        onPress={() =>
+          navigation.navigate('Suggest Detail', { suggestion: item })
+        }
+        style={[styles.card, isOwn && styles.ownCard]}
       >
-        <View style={[styles.card, isOwn && styles.ownCard]}>
-          {/* Category icon */}
-          <View style={[styles.iconBox, { backgroundColor: cat.bg }]}>
-            <Text style={styles.categoryIcon}>{cat.icon}</Text>
-          </View>
+        {/* Category icon box */}
+        <View style={[styles.iconBox, { backgroundColor: cat.bg }]}>
+          <Ionicons name={cat.icon} size={scale(22, 26, 30)} color={cat.color} />
+        </View>
 
-          {/* Content */}
-          <View style={styles.cardContent}>
-            {/* Top row: category badge and status badge */}
-            <View style={styles.cardHeader}>
-              <View style={[styles.badge, { backgroundColor: cat.color + '20' }]}>
-                <Text style={[styles.badgeText, { color: cat.color }]}>{cat.label}</Text>
-              </View>
-              <View style={[styles.badge, { backgroundColor: status.bg }]}>
-                <Text style={[styles.badgeText, { color: status.color }]}>{status.label}</Text>
-              </View>
-              {isOwn && (
-                <View style={[styles.badge, { backgroundColor: COLORS.primary + '20' }]}>
-                  <Text style={[styles.badgeText, { color: COLORS.primary }]}>Yours</Text>
-                </View>
-              )}
+        {/* Content */}
+        <View style={styles.cardContent}>
+          {/* Top row of badges */}
+          <View style={styles.cardHeader}>
+            <View style={[styles.badge, { backgroundColor: cat.bg }]}>
+              <Text style={[styles.badgeText, { color: cat.color }]}>
+                {cat.label}
+              </Text>
             </View>
 
-            {/* Description */}
-            <Text style={styles.description} numberOfLines={2}>
-              {item.description}
-            </Text>
+            <View style={[styles.badge, { backgroundColor: status.bg }]}>
+              <Ionicons name={status.icon} size={10} color={status.color} />
+              <Text
+                style={[
+                  styles.badgeText,
+                  { color: status.color, marginLeft: 3 },
+                ]}
+              >
+                {status.label}
+              </Text>
+            </View>
 
-            {/* Meta info: location, date, reporter */}
-            <View style={styles.metaRow}>
-              {item.location ? (
-                <Text style={styles.metaText}>📍 {item.location}</Text>
-              ) : null}
-              <Text style={styles.metaText}>
-                {formattedDate} · {item.reportedByName || item.reportedBy || 'Anonymous'}
+            {isOwn && (
+              <View
+                style={[
+                  styles.badge,
+                  { backgroundColor: COLORS.primaryLight },
+                ]}
+              >
+                <Ionicons name="star" size={10} color={COLORS.primary} />
+                <Text
+                  style={[
+                    styles.badgeText,
+                    { color: COLORS.primary, marginLeft: 3 },
+                  ]}
+                >
+                  Yours
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Description */}
+          <Text style={styles.description} numberOfLines={2}>
+            {item.description}
+          </Text>
+
+          {/* Meta row */}
+          <View style={styles.metaRow}>
+            {item.location ? (
+              <View style={styles.metaItem}>
+                <Ionicons name="location-outline" size={12} color={COLORS.muted} />
+                <Text style={styles.metaText} numberOfLines={1}>
+                  {item.location}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.metaItem}>
+              <Ionicons name="calendar-outline" size={12} color={COLORS.muted} />
+              <Text style={styles.metaText} numberOfLines={1}>
+                {formattedDate || 'Just now'} ·{' '}
+                {item.reportedByName || 'Anonymous'}
               </Text>
             </View>
           </View>
+        </View>
+
+        {/* Chevron */}
+        <View style={styles.chevronBox}>
+          <Ionicons name="chevron-forward" size={18} color="#B0B3BF" />
         </View>
       </TouchableOpacity>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Community Reports</Text>
-        <IconButton
-          icon="account"
-          size={24}
-          color={COLORS.primary}
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="chevron-back" size={26} color={COLORS.primary} />
+        </TouchableOpacity>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerTitle}>Community Reports</Text>
+          <Text style={styles.headerSubtitle}>
+            {suggestions.length} total report
+            {suggestions.length === 1 ? '' : 's'}
+          </Text>
+        </View>
+        <TouchableOpacity
           onPress={() => navigation.navigate('Login')}
-        />
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="person-circle-outline" size={26} color={COLORS.primary} />
+        </TouchableOpacity>
       </View>
 
-      {/* Search Bar */}
+      {/* Search */}
       <View style={styles.searchContainer}>
+        <Ionicons name="search" size={18} color="#666" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search reports..."
           value={search}
           onChangeText={setSearch}
-          placeholderTextColor={COLORS.placeholder}
+          placeholderTextColor={COLORS.muted}
+          returnKeyType="search"
         />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')}>
+            <Ionicons name="close-circle" size={18} color="#666" />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* Filter Chips – Status */}
+      {/* Status filter chips */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterRow}
+        contentContainerStyle={styles.filterContent}
+      >
+        {STATUS_FILTERS.map((chip) => {
+          const isActive = activeStatus === chip.value;
+          return (
+            <TouchableOpacity
+              key={chip.value}
+              onPress={() => setActiveStatus(chip.value)}
+              style={[styles.filterChip, isActive && styles.filterChipActive]}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  isActive && styles.filterChipTextActive,
+                ]}
+              >
+                {chip.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* Category filter chips */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -217,121 +381,302 @@ const SuggestListScreen = ({ navigation }) => {
         contentContainerStyle={styles.filterContent}
       >
         {[
-          { label: 'All', value: 'all' },
-          { label: 'Reported', value: 'reported' },
-          { label: 'Submitted', value: 'submitted' },
-          { label: 'In Progress', value: 'in-progress' },
-          { label: 'Resolved', value: 'resolved' },
-        ].map(chip => (
-          <TouchableOpacity
-            key={chip.value}
-            onPress={() => setActiveStatus(chip.value)}
-            style={[styles.filterChip, activeStatus === chip.value && styles.filterChipActive]}
-          >
-            <Text style={activeStatus === chip.value ? styles.filterChipTextActive : styles.filterChipText}>
-              {chip.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+          { label: 'All', value: 'all', icon: 'apps' },
+          ...Object.entries(CATEGORIES).map(([key, val]) => ({
+            label: val.label,
+            value: key,
+            icon: val.icon,
+            color: val.color,
+          })),
+        ].map((chip) => {
+          const isActive = activeCategory === chip.value;
+          return (
+            <TouchableOpacity
+              key={chip.value}
+              onPress={() => setActiveCategory(chip.value)}
+              style={[styles.filterChip, isActive && styles.filterChipActive]}
+            >
+              <Ionicons
+                name={chip.icon}
+                size={12}
+                color={isActive ? '#fff' : chip.color || COLORS.primary}
+              />
+              <Text
+                style={[
+                  styles.filterChipText,
+                  { marginLeft: 4 },
+                  isActive && styles.filterChipTextActive,
+                ]}
+              >
+                {chip.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
-
-      {/* Filter Chips – Category */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterRow}
-        contentContainerStyle={styles.filterContent}
-      >
-        {[{ label: 'All', value: 'all' }, ...Object.entries(CATEGORIES).map(([key, val]) => ({ label: val.icon + ' ' + val.label, value: key }))].map(chip => (
-          <TouchableOpacity
-            key={chip.value}
-            onPress={() => setActiveCategory(chip.value)}
-            style={[styles.filterChip, activeCategory === chip.value && styles.filterChipActive]}
-          >
-            <Text style={activeCategory === chip.value ? styles.filterChipTextActive : styles.filterChipText}>
-              {chip.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      <Divider style={styles.divider} />
 
       {/* List */}
-      <FlatList
-        data={filtered}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>📋</Text>
-            <Text style={styles.emptyText}>
-              {loading ? 'Loading...' : 'No reports found'}
-            </Text>
-            <Text style={styles.emptySubtext}>
-              {search || activeStatus !== 'all' || activeCategory !== 'all'
-                ? 'Try adjusting your filters.'
-                : 'Be the first to report an issue!'}
-            </Text>
-          </View>
-        }
-      />
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading reports...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: insets.bottom + 100 },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={COLORS.primary}
+              colors={[COLORS.primary]}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconBox}>
+                <Ionicons name="document-text-outline" size={40} color="#B0B3BF" />
+              </View>
+              <Text style={styles.emptyTitle}>No reports found</Text>
+              <Text style={styles.emptySubtext}>
+                {search || activeStatus !== 'all' || activeCategory !== 'all'
+                  ? 'Try adjusting your filters.'
+                  : 'Be the first to report an issue!'}
+              </Text>
+            </View>
+          }
+        />
+      )}
 
-      {/* FAB to add new report */}
+      {/* FAB */}
       <FAB
-        style={styles.fab}
+        style={[styles.fab, { bottom: insets.bottom + SPACING.md }]}
         icon="plus"
-        color={COLORS.white}
+        color="#fff"
         onPress={() => navigation.navigate('Suggest Add')}
       />
     </SafeAreaView>
   );
 };
 
-// ---------- STYLES (same as before) ----------
+export default SuggestListScreen;
+
+// ---------- Styles ----------
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: COLORS.surface,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    gap: SPACING.sm,
   },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: COLORS.primary },
-  searchContainer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
-  searchInput: { backgroundColor: '#eee', padding: 12, borderRadius: 12, fontSize: 16, color: COLORS.text },
-  filterRow: { flexGrow: 0, marginTop: 8, maxHeight: 44 },
-  filterContent: { paddingHorizontal: 16, gap: 8 },
-  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#e2e2e2', marginRight: 8, justifyContent: 'center' },
-  filterChipActive: { backgroundColor: COLORS.primary },
-  filterChipText: { color: COLORS.placeholder, fontWeight: '500', fontSize: 13 },
-  filterChipTextActive: { color: COLORS.white, fontWeight: '500', fontSize: 13 },
-  divider: { marginTop: 8, backgroundColor: COLORS.border },
-  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 80 },
-  card: { flexDirection: 'row', backgroundColor: COLORS.surface, borderRadius: 12, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12, overflow: 'hidden' },
-  ownCard: { borderColor: COLORS.primary, borderWidth: 1.5, backgroundColor: '#f8f9ff' },
-  iconBox: { width: 80, justifyContent: 'center', alignItems: 'center' },
-  categoryIcon: { fontSize: 28 },
-  cardContent: { flex: 1, padding: 12, justifyContent: 'center' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 6, gap: 6 },
-  badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12 },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  description: { fontSize: 15, color: COLORS.text, fontWeight: '500', marginBottom: 6, lineHeight: 20 },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' },
-  metaText: { fontSize: 12, color: COLORS.placeholder, flexShrink: 1 },
-  emptyContainer: { alignItems: 'center', marginTop: 60 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyText: { fontSize: 18, fontWeight: '600', color: COLORS.text },
-  emptySubtext: { fontSize: 14, color: COLORS.placeholder, marginTop: 4 },
-  fab: { position: 'absolute', margin: 16, right: 0, bottom: 0, backgroundColor: COLORS.primary },
-});
+  headerTextContainer: { flex: 1 },
+  headerTitle: {
+    fontSize: scale(16, 18, 20),
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  headerSubtitle: {
+    fontSize: scale(10, 11, 12),
+    color: COLORS.muted,
+    marginTop: 1,
+    fontWeight: '500',
+  },
 
-export default SuggestListScreen;
+  // Search
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.sm,
+    paddingHorizontal: 12,
+    paddingVertical: scale(6, 8, 10),
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  searchIcon: { marginRight: 8 },
+  searchInput: {
+    flex: 1,
+    fontSize: scale(13, 14, 15),
+    color: COLORS.text,
+    paddingVertical: 2,
+  },
+
+  // Filters
+  filterRow: {
+    flexGrow: 0,
+    marginTop: SPACING.sm,
+    maxHeight: scale(36, 40, 44),
+  },
+  filterContent: {
+    paddingHorizontal: SPACING.md,
+    gap: 8,
+    alignItems: 'center',
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginRight: 8,
+  },
+  filterChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  filterChipText: {
+    fontSize: scale(11, 12, 13),
+    color: COLORS.subtext,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+
+  // List
+  listContent: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+  },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: {
+    marginTop: 10,
+    color: COLORS.muted,
+    fontSize: scale(12, 13, 14),
+    fontWeight: '500',
+  },
+
+  // Card
+  card: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: scale(14, 16, 18),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.sm,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+  },
+  ownCard: {
+    borderColor: COLORS.primary,
+    borderWidth: 2,
+    backgroundColor: '#F8F9FF',
+  },
+  iconBox: {
+    width: scale(56, 66, 76),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cardContent: {
+    flex: 1,
+    paddingVertical: SPACING.sm,
+    paddingRight: SPACING.sm,
+    justifyContent: 'center',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 6,
+    gap: 4,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  badgeText: {
+    fontSize: scale(9, 10, 11),
+    fontWeight: '700',
+  },
+  description: {
+    fontSize: scale(13, 14, 15),
+    color: COLORS.text,
+    fontWeight: '500',
+    marginBottom: 6,
+    lineHeight: scale(18, 19, 20),
+  },
+  metaRow: {
+    flexDirection: 'column',
+    gap: 2,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaText: {
+    fontSize: scale(10, 11, 12),
+    color: COLORS.muted,
+    flex: 1,
+  },
+  chevronBox: {
+    justifyContent: 'center',
+    paddingRight: SPACING.sm,
+  },
+
+  // Empty
+  emptyContainer: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingHorizontal: SPACING.lg,
+  },
+  emptyIconBox: {
+    width: scale(80, 90, 100),
+    height: scale(80, 90, 100),
+    borderRadius: scale(20, 22, 24),
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  emptyTitle: {
+    fontSize: scale(15, 16, 17),
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: scale(12, 13, 14),
+    color: COLORS.muted,
+    textAlign: 'center',
+  },
+
+  // FAB
+  fab: {
+    position: 'absolute',
+    right: SPACING.md,
+    backgroundColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+});
