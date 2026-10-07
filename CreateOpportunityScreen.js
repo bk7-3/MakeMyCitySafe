@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  SafeAreaView,
   StyleSheet,
   View,
   ScrollView,
@@ -13,48 +12,72 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Dimensions,
 } from 'react-native';
-import { IconButton, Provider, DefaultTheme } from 'react-native-paper';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Provider, DefaultTheme } from 'react-native-paper';
+import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { db, auth } from '../firebase';               
+import { db, auth } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';   
+import { onAuthStateChanged } from 'firebase/auth';
 
-//  THEME 
+// ---------- Responsive helpers ----------
+const { height: SCREEN_H } = Dimensions.get('window');
+const isSmallDevice = SCREEN_H < 700;
+const isLargeDevice = SCREEN_H > 850;
+
+const scale = (small, normal, large) => {
+  if (isSmallDevice) return small;
+  if (isLargeDevice) return large;
+  return normal;
+};
+
+const SPACING = {
+  xs: scale(4, 6, 8),
+  sm: scale(8, 10, 12),
+  md: scale(12, 16, 20),
+  lg: scale(16, 20, 24),
+  xl: scale(20, 24, 28),
+};
+
+// ---------- Theme ----------
 const theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
     primary: '#000666',
     accent: '#000666',
-    background: '#f9f9f9',
+    background: '#F5F7FA',
     surface: '#ffffff',
     text: '#1a1c1c',
-    placeholder: '#454652',
-    border: '#c6c5d4',
+    placeholder: '#8A8A9E',
+    border: '#DFE1E8',
     primaryContainer: '#1a237e',
     onPrimaryContainer: '#ffffff',
   },
 };
 
-const categories = [
-  { label: 'Cleanup', value: 'cleanup' },
-  { label: 'Safety Training', value: 'safety' },
-  { label: 'Neighborhood Watch', value: 'neighborhood' },
-  { label: 'Education', value: 'education' },
-  { label: 'Public Health', value: 'health' },
+// ---------- Categories ----------
+const CATEGORIES = [
+  { label: 'Cleanup', value: 'cleanup', icon: 'leaf', color: '#2E7D32' },
+  { label: 'Safety Training', value: 'safety', icon: 'shield-checkmark', color: '#F9A825' },
+  { label: 'Neighborhood Watch', value: 'neighborhood', icon: 'people', color: '#000666' },
+  { label: 'Education', value: 'education', icon: 'school', color: '#6A1B9A' },
+  { label: 'Public Health', value: 'health', icon: 'heart', color: '#BA1A1A' },
 ];
 
-//  LOCATIONIQ TOKEN 
+// ---------- LocationIQ ----------
 const LOCATIONIQ_TOKEN = 'pk.c5f5e38514d66f974793defde833cb25';
 
-//  LocationIQ Static Map
 const getStaticMapUrl = (lat, lng, zoom = 14, width = 400, height = 200) => {
   return `https://maps.locationiq.com/v3/staticmap?key=${LOCATIONIQ_TOKEN}&center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&format=png`;
 };
 
-//  MAIN COMPONENT 
-const CreateOpportunityScreen = ({ navigation, route }) => {  
+const CreateOpportunityScreen = ({ navigation, route }) => {
+  const insets = useSafeAreaInsets();
+
   const [currentUser, setCurrentUser] = useState(null);
 
   // Form state
@@ -79,34 +102,29 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
 
   const debounceTimer = useRef(null);
 
-  // redirect if no user
+  // ---------- Auth redirect ----------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser(user);
       } else {
-        Alert.alert('Not logged in', 'Please sign in to create an opportunity.');
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
+        Alert.alert('Not signed in', 'Please sign in to create an opportunity.');
+        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
       }
     });
     return unsubscribe;
   }, []);
 
-  // Prefill group name if navigating from a group
+  // ---------- Prefill group name ----------
   useEffect(() => {
     if (route.params?.groupName) {
       setGroupName(route.params.groupName);
     }
   }, [route.params?.groupName]);
 
-  //  Fetch suggestions from LocationIQ 
+  // ---------- LocationIQ autocomplete ----------
   useEffect(() => {
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
 
     const query = destination.trim();
     if (query.length < 2) {
@@ -119,7 +137,9 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     debounceTimer.current = setTimeout(async () => {
       try {
         const response = await fetch(
-          `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(query)}&format=json&limit=5`
+          `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(
+            query
+          )}&format=json&limit=5`
         );
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
@@ -140,7 +160,7 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
         if (error.message.includes('401') || error.message.includes('403')) {
           Alert.alert(
             'API Key Error',
-            'Your LocationIQ token is invalid or expired. Please check your token at locationiq.com'
+            'Your LocationIQ token is invalid or expired.'
           );
         }
         setSuggestions([]);
@@ -155,27 +175,24 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     };
   }, [destination]);
 
-  //  Handle selection from suggestions 
   const handleSuggestionSelect = (item) => {
-    console.log('Selected:', item);
     setDestination(item.description);
     setCoordinates({ lat: item.lat, lng: item.lng });
-    const url = getStaticMapUrl(item.lat, item.lng);
-    console.log('Map URL:', url);
-    setMapImageUrl(url);
+    setMapImageUrl(getStaticMapUrl(item.lat, item.lng));
     setShowSuggestions(false);
     setSuggestions([]);
   };
 
-  //  manual geocode 
   const handleManualGeocode = async () => {
     if (destination.trim().length < 3) {
-      Alert.alert('Please enter a valid address');
+      Alert.alert('Invalid address', 'Please enter a valid address.');
       return;
     }
     try {
       const response = await fetch(
-        `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(destination)}&format=json&limit=1`
+        `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(
+          destination
+        )}&format=json&limit=1`
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -183,10 +200,8 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
         const item = data[0];
         const coords = { lat: parseFloat(item.lat), lng: parseFloat(item.lon) };
         setCoordinates(coords);
-        const url = getStaticMapUrl(coords.lat, coords.lng);
-        setMapImageUrl(url);
+        setMapImageUrl(getStaticMapUrl(coords.lat, coords.lng));
         setShowSuggestions(false);
-        Alert.alert('Location found!', 'Map updated with your address.');
       } else {
         Alert.alert('Location not found', 'Please try a more specific address.');
       }
@@ -196,35 +211,13 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     }
   };
 
-  //  Date / Time  
-  const onDateChange = (event, selectedDate) => {
-    const currentDate = selectedDate || date;
-    setShowDatePicker(Platform.OS === 'ios');
-    setDate(currentDate);
-  };
+  // ---------- Date/time ----------
+  const formatDate = (d) =>
+    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formatTime = (d) =>
+    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
-  const onTimeChange = (event, selectedTime) => {
-    const currentTime = selectedTime || time;
-    setShowTimePicker(Platform.OS === 'ios');
-    setTime(currentTime);
-  };
-
-  const formatDate = (date) => {
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  //  Submit 
+  // ---------- Submit ----------
   const handleSubmit = async () => {
     if (!eventName || !category || !groupName || !destination || !description) {
       Alert.alert('Missing Fields', 'Please fill in all required fields.');
@@ -237,23 +230,23 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
 
     setLoading(true);
     try {
-      const docRef = await addDoc(collection(db, 'opportunities'), {
-        eventName,
+      await addDoc(collection(db, 'opportunities'), {
+        eventName: eventName.trim(),
         category,
-        groupName,
+        groupName: groupName.trim(),
         capacity: parseInt(capacity) || 0,
-        destination,
+        destination: destination.trim(),
         date: date.toISOString(),
         time: time.toISOString(),
-        description,
+        description: description.trim(),
         coordinates,
         createdAt: new Date().toISOString(),
-        createdBy: currentUser.uid,              
-        groupId: route.params?.groupId || null,   
+        createdBy: currentUser.uid,
+        groupId: route.params?.groupId || null,
       });
-      console.log('Opportunity created with ID:', docRef.id);
-      Alert.alert('Success', 'Opportunity posted successfully!');
-      navigation.goBack();
+      Alert.alert('Success', 'Opportunity posted successfully!', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
     } catch (error) {
       console.error('Error creating opportunity:', error);
       Alert.alert('Error', 'Failed to post opportunity. Please try again.');
@@ -262,303 +255,389 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleSaveDraft = () => {
-    Alert.alert('Draft Saved', 'Your opportunity has been saved as a draft.');
-  };
+  const getCategoryInfo = () =>
+    CATEGORIES.find((c) => c.value === category) || null;
 
-  //  RENDER 
   return (
     <Provider theme={theme}>
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f9f9f9" />
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeButton}>
-            <IconButton icon="close" size={24} color="#000666" />
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={26} color="#000666" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>New Opportunity</Text>
-          <View style={{ width: 48 }} />
+          <View style={{ width: 26 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Community Impact Card */}
-          <View style={styles.impactCard}>
-            <Text style={styles.impactTitle}>Community Impact</Text>
-            <Text style={styles.impactText}>
-              Creating a new opportunity helps mobilize local volunteers. Be clear about your goals
-              to attract the best matching help.
-            </Text>
-          </View>
-
-          {/* Posting Tips */}
-          <View style={styles.tipsCard}>
-            <Text style={styles.tipsTitle}>Posting Tips</Text>
-            <View style={styles.tipItem}>
-              <Text style={styles.tipIcon}>✓</Text>
-              <Text style={styles.tipText}>Use high-quality images for your event header.</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Text style={styles.tipIcon}>✓</Text>
-              <Text style={styles.tipText}>Clearly state the required skills if any.</Text>
-            </View>
-            <View style={styles.tipItem}>
-              <Text style={styles.tipIcon}>✓</Text>
-              <Text style={styles.tipText}>Double-check the meeting coordinates.</Text>
-            </View>
-          </View>
-
-          {/* Map Container */}
-          <View style={styles.mapContainer}>
-            {searching ? (
-              <View style={styles.mapPlaceholder}>
-                <ActivityIndicator size="large" color="#000666" />
-                <Text style={styles.mapPlaceholderText}>Searching...</Text>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: insets.bottom + 100 },
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Impact card */}
+            <View style={styles.impactCard}>
+              <View style={styles.impactHeader}>
+                <Ionicons name="sparkles" size={20} color="#fff" />
+                <Text style={styles.impactTitle}>Community Impact</Text>
               </View>
-            ) : mapImageUrl ? (
-              <>
-                <Image
-                  source={{ uri: mapImageUrl }}
-                  style={styles.mapImage}
-                  resizeMode="cover"
-                  onLoadStart={() => setMapLoading(true)}
-                  onLoadEnd={() => {
-                    setMapLoading(false);
-                    console.log('Map loaded successfully');
-                  }}
-                  onError={(e) => {
-                    setMapLoading(false);
-                    console.error('Map image error:', e.nativeEvent.error);
-                    setMapImageUrl(null);
-                  }}
-                />
-                {mapLoading && (
-                  <View style={styles.mapLoadingOverlay}>
-                    <ActivityIndicator size="large" color="#000666" />
-                  </View>
-                )}
-                <View style={styles.mapAttribution}>
-                  <Text style={styles.mapAttributionText}>
-                    Map data © OpenStreetMap, powered by LocationIQ
-                  </Text>
+              <Text style={styles.impactText}>
+                Creating a new opportunity helps mobilize local volunteers. Be clear
+                about your goals to attract the best matching help.
+              </Text>
+            </View>
+
+            {/* Tips card */}
+            <View style={styles.tipsCard}>
+              <Text style={styles.tipsTitle}>Posting Tips</Text>
+              {[
+                'Use high-quality images for your event header.',
+                'Clearly state the required skills if any.',
+                'Double-check the meeting coordinates.',
+              ].map((tip, i) => (
+                <View key={i} style={styles.tipItem}>
+                  <Ionicons name="checkmark-circle" size={14} color="#4555b7" />
+                  <Text style={styles.tipText}>{tip}</Text>
                 </View>
-              </>
-            ) : (
-              <View style={styles.mapPlaceholder}>
-                <Text style={styles.mapPlaceholderText}>
-                  {destination.trim().length === 0
-                    ? 'Enter a destination to see the map'
-                    : 'Location not found. Try selecting from suggestions or press "Search".'}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Event Details */}
-          <View style={styles.formSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>ℹ️</Text>
-              <Text style={styles.sectionTitle}>Event Details</Text>
+              ))}
             </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Event Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. Park Cleanup Day"
-                value={eventName}
-                onChangeText={setEventName}
-                placeholderTextColor="#767683"
-              />
-            </View>
-
-            <View style={styles.row}>
-              <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.label}>Category</Text>
-                <TouchableOpacity
-                  style={styles.pickerButton}
-                  onPress={() => setShowCategoryModal(true)}
-                >
-                  <Text style={category ? styles.pickerText : styles.pickerPlaceholder}>
-                    {category ? categories.find(c => c.value === category)?.label : 'Select category'}
+            {/* Map preview */}
+            <View style={styles.mapContainer}>
+              {searching ? (
+                <View style={styles.mapPlaceholder}>
+                  <ActivityIndicator size="large" color="#000666" />
+                  <Text style={styles.mapPlaceholderText}>Searching...</Text>
+                </View>
+              ) : mapImageUrl ? (
+                <>
+                  <Image
+                    source={{ uri: mapImageUrl }}
+                    style={styles.mapImage}
+                    resizeMode="cover"
+                    onLoadStart={() => setMapLoading(true)}
+                    onLoadEnd={() => setMapLoading(false)}
+                    onError={() => setMapImageUrl(null)}
+                  />
+                  {mapLoading && (
+                    <View style={styles.mapLoadingOverlay}>
+                      <ActivityIndicator size="large" color="#000666" />
+                    </View>
+                  )}
+                  <View style={styles.mapAttribution}>
+                    <Text style={styles.mapAttributionText}>
+                      Map data © OpenStreetMap · LocationIQ
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.mapPlaceholder}>
+                  <Ionicons name="map-outline" size={32} color="#B0B3BF" />
+                  <Text style={styles.mapPlaceholderText}>
+                    {destination.trim().length === 0
+                      ? 'Enter a destination to see the map'
+                      : 'Location not found. Try selecting from suggestions.'}
                   </Text>
-                  <Text style={styles.pickerArrow}>▼</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
-                <Text style={styles.label}>Group Name</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Green Earth Society"
-                  value={groupName}
-                  onChangeText={setGroupName}
-                  placeholderTextColor="#767683"
-                />
-              </View>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Volunteer Capacity</Text>
-              <View style={styles.capacityContainer}>
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  placeholder="0"
-                  value={capacity}
-                  onChangeText={setCapacity}
-                  keyboardType="numeric"
-                  placeholderTextColor="#767683"
-                />
-                <Text style={styles.capacityLabel}>People</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Where & When */}
-          <View style={styles.formSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>📍</Text>
-              <Text style={styles.sectionTitle}>Where & When</Text>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Meeting Destination</Text>
-              <View style={styles.destinationContainer}>
-                <Text style={styles.searchIcon}>🔍</Text>
-                <TextInput
-                  style={[styles.input, { borderWidth: 0, paddingLeft: 36 }]}
-                  placeholder="Start typing an address or landmark..."
-                  value={destination}
-                  onChangeText={setDestination}
-                  onSubmitEditing={handleManualGeocode}
-                  returnKeyType="search"
-                  placeholderTextColor="#767683"
-                />
-              </View>
-              {/* Suggestions dropdown */}
-              {showSuggestions && suggestions.length > 0 && (
-                <View style={styles.suggestionsContainer}>
-                  <ScrollView style={{ maxHeight: 150 }}>
-                    {suggestions.map((item, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={styles.suggestionItem}
-                        onPress={() => handleSuggestionSelect(item)}
-                      >
-                        <Text style={styles.suggestionText} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
                 </View>
               )}
             </View>
 
-            <View style={styles.row}>
-              <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
-                <Text style={styles.label}>Meeting Date</Text>
-                <TouchableOpacity
-                  style={styles.datePickerButton}
-                  onPress={() => setShowDatePicker(true)}
-                >
-                  <Text style={styles.datePickerText}>{formatDate(date)}</Text>
-                </TouchableOpacity>
-                {showDatePicker && (
-                  <DateTimePicker
-                    value={date}
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onDateChange}
+            {/* Event Details */}
+            <View style={styles.formSection}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconBox}>
+                  <Ionicons name="information-circle" size={16} color="#000666" />
+                </View>
+                <Text style={styles.sectionTitle}>Event Details</Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Event Name *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Park Cleanup Day"
+                  value={eventName}
+                  onChangeText={setEventName}
+                  placeholderTextColor="#8A8A9E"
+                />
+              </View>
+
+              <View style={styles.row}>
+                <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                  <Text style={styles.label}>Category *</Text>
+                  <TouchableOpacity
+                    style={styles.pickerButton}
+                    onPress={() => setShowCategoryModal(true)}
+                    activeOpacity={0.8}
+                  >
+                    {category ? (
+                      <View style={styles.pickerValueRow}>
+                        <Ionicons
+                          name={getCategoryInfo()?.icon || 'pricetag'}
+                          size={16}
+                          color={getCategoryInfo()?.color || '#000666'}
+                        />
+                        <Text style={styles.pickerText}>
+                          {getCategoryInfo()?.label}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.pickerPlaceholder}>Select category</Text>
+                    )}
+                    <Ionicons name="chevron-down" size={16} color="#767683" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                  <Text style={styles.label}>Group Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Green Earth"
+                    value={groupName}
+                    onChangeText={setGroupName}
+                    placeholderTextColor="#8A8A9E"
                   />
+                </View>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Volunteer Capacity</Text>
+                <View style={styles.capacityContainer}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, paddingRight: 70 }]}
+                    placeholder="0"
+                    value={capacity}
+                    onChangeText={setCapacity}
+                    keyboardType="numeric"
+                    placeholderTextColor="#8A8A9E"
+                  />
+                  <Text style={styles.capacityLabel}>people</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Where & When */}
+            <View style={styles.formSection}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconBox}>
+                  <Ionicons name="location" size={16} color="#000666" />
+                </View>
+                <Text style={styles.sectionTitle}>Where & When</Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Meeting Destination *</Text>
+                <View style={styles.destinationContainer}>
+                  <Ionicons
+                    name="search"
+                    size={16}
+                    color="#767683"
+                    style={styles.destinationIcon}
+                  />
+                  <TextInput
+                    style={styles.destinationInput}
+                    placeholder="Start typing an address or landmark..."
+                    value={destination}
+                    onChangeText={setDestination}
+                    onSubmitEditing={handleManualGeocode}
+                    returnKeyType="search"
+                    placeholderTextColor="#8A8A9E"
+                  />
+                </View>
+
+                {showSuggestions && suggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    <ScrollView
+                      nestedScrollEnabled
+                      keyboardShouldPersistTaps="handled"
+                      style={{ maxHeight: 160 }}
+                    >
+                      {suggestions.map((item, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={styles.suggestionItem}
+                          onPress={() => handleSuggestionSelect(item)}
+                        >
+                          <Ionicons name="location-outline" size={14} color="#767683" />
+                          <Text style={styles.suggestionText} numberOfLines={2}>
+                            {item.description}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
                 )}
               </View>
-              <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
-                <Text style={styles.label}>Meeting Time</Text>
-                <TouchableOpacity
-                  style={styles.datePickerButton}
-                  onPress={() => setShowTimePicker(true)}
-                >
-                  <Text style={styles.datePickerText}>{formatTime(time)}</Text>
-                </TouchableOpacity>
-                {showTimePicker && (
-                  <DateTimePicker
-                    value={time}
-                    mode="time"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    onChange={onTimeChange}
-                  />
-                )}
+
+              <View style={styles.row}>
+                <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                  <Text style={styles.label}>Meeting Date</Text>
+                  <TouchableOpacity
+                    style={styles.datePickerButton}
+                    onPress={() => setShowDatePicker(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="calendar-outline" size={16} color="#000666" />
+                    <Text style={styles.datePickerText}>{formatDate(date)}</Text>
+                  </TouchableOpacity>
+                  {showDatePicker && (
+                    <DateTimePicker
+                      value={date}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, selected) => {
+                        setShowDatePicker(false);
+                        if (selected) setDate(selected);
+                      }}
+                    />
+                  )}
+                </View>
+
+                <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                  <Text style={styles.label}>Meeting Time</Text>
+                  <TouchableOpacity
+                    style={styles.datePickerButton}
+                    onPress={() => setShowTimePicker(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="time-outline" size={16} color="#000666" />
+                    <Text style={styles.datePickerText}>{formatTime(time)}</Text>
+                  </TouchableOpacity>
+                  {showTimePicker && (
+                    <DateTimePicker
+                      value={time}
+                      mode="time"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, selected) => {
+                        setShowTimePicker(false);
+                        if (selected) setTime(selected);
+                      }}
+                    />
+                  )}
+                </View>
               </View>
             </View>
-          </View>
 
-          {/* Mission and Goals */}
-          <View style={styles.formSection}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionIcon}>📝</Text>
-              <Text style={styles.sectionTitle}>Mission & Goals</Text>
+            {/* Mission & Goals */}
+            <View style={styles.formSection}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconBox}>
+                  <Ionicons name="document-text" size={16} color="#000666" />
+                </View>
+                <Text style={styles.sectionTitle}>Mission & Goals</Text>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Meeting Goal / Description *</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  placeholder="Describe the impact of this event and what volunteers will be doing..."
+                  value={description}
+                  onChangeText={setDescription}
+                  multiline
+                  numberOfLines={5}
+                  textAlignVertical="top"
+                  placeholderTextColor="#8A8A9E"
+                />
+              </View>
             </View>
+          </ScrollView>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Meeting Goal / Description</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Describe the impact of this event and what volunteers will be doing..."
-                value={description}
-                onChangeText={setDescription}
-                multiline
-                numberOfLines={5}
-                textAlignVertical="top"
-                placeholderTextColor="#767683"
-              />
-            </View>
+          {/* Bottom Action Bar — centered with single Post button */}
+          <View
+            style={[
+              styles.bottomBar,
+              { paddingBottom: Math.max(insets.bottom, SPACING.sm) },
+            ]}
+          >
+            <TouchableOpacity
+              style={[styles.submitButton, loading && styles.disabledButton]}
+              onPress={handleSubmit}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Text style={styles.submitButtonText}>Post Opportunity</Text>
+                  <Ionicons name="arrow-forward" size={16} color="#fff" />
+                </>
+              )}
+            </TouchableOpacity>
           </View>
-
-          <View style={{ height: 100 }} />
-        </ScrollView>
-
-        {/* Bottom action bar */}
-        <View style={styles.bottomBar}>
-          <View style={styles.bottomBarContent}>
-            <View style={styles.bottomBarRight}>
-              <TouchableOpacity style={styles.draftButton} onPress={handleSaveDraft}>
-                <Text style={styles.draftButtonText}>Save as Draft</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, loading && styles.disabledButton]}
-                onPress={handleSubmit}
-                disabled={loading}
-              >
-                <Text style={styles.submitButtonText}>
-                  {loading ? 'Posting...' : 'Post Opportunity'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+        </KeyboardAvoidingView>
 
         {/* Category Modal */}
         <Modal
           visible={showCategoryModal}
           transparent
-          animationType="slide"
+          animationType="fade"
+          statusBarTranslucent
           onRequestClose={() => setShowCategoryModal(false)}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalOverlay,
+              { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
+            ]}
+          >
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Select Category</Text>
-              {categories.map((item) => (
-                <TouchableOpacity
-                  key={item.value}
-                  style={styles.modalItem}
-                  onPress={() => {
-                    setCategory(item.value);
-                    setShowCategoryModal(false);
-                  }}
-                >
-                  <Text style={styles.modalItemText}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
+              <View style={styles.modalHeader}>
+                <Ionicons name="pricetag" size={22} color="#000666" />
+                <Text style={styles.modalTitle}>Select Category</Text>
+              </View>
+
+              {CATEGORIES.map((item) => {
+                const isSelected = category === item.value;
+                return (
+                  <TouchableOpacity
+                    key={item.value}
+                    style={[
+                      styles.modalItem,
+                      isSelected && styles.modalItemSelected,
+                    ]}
+                    onPress={() => {
+                      setCategory(item.value);
+                      setShowCategoryModal(false);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.modalItemIcon,
+                        { backgroundColor: `${item.color}20` },
+                      ]}
+                    >
+                      <Ionicons name={item.icon} size={18} color={item.color} />
+                    </View>
+                    <Text
+                      style={[
+                        styles.modalItemText,
+                        isSelected && styles.modalItemTextSelected,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                    {isSelected && (
+                      <Ionicons name="checkmark-circle" size={20} color="#000666" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => setShowCategoryModal(false)}
@@ -573,56 +652,103 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
   );
 };
 
-//  STYLES 
+export default CreateOpportunityScreen;
+
+// ---------- Styles ----------
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9f9f9' },
+  container: { flex: 1, backgroundColor: '#F5F7FA' },
+
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 12,
-    backgroundColor: '#ffffff',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e2e2',
+    borderBottomColor: '#E6E8EE',
   },
-  closeButton: { marginLeft: -8 },
   headerTitle: {
-    fontSize: 20,
+    fontSize: scale(16, 18, 20),
     fontWeight: '700',
     color: '#000666',
     flex: 1,
     textAlign: 'center',
   },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
+
+  scrollContent: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+  },
+
+  // Impact card
   impactCard: {
-    backgroundColor: '#1a237e',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
+    backgroundColor: '#000666',
+    padding: SPACING.md,
+    borderRadius: scale(14, 16, 18),
+    marginBottom: SPACING.md,
+    shadowColor: '#000666',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  impactTitle: { fontSize: 18, fontWeight: '600', color: '#ffffff', marginBottom: 4 },
-  impactText: { fontSize: 16, color: '#e0e0ff', lineHeight: 24 },
+  impactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  impactTitle: {
+    fontSize: scale(14, 15, 16),
+    fontWeight: '700',
+    color: '#fff',
+  },
+  impactText: {
+    fontSize: scale(12, 13, 14),
+    color: '#E0E0FF',
+    lineHeight: scale(18, 20, 22),
+  },
+
+  // Tips
   tipsCard: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: '#fff',
+    padding: SPACING.md,
+    borderRadius: scale(14, 16, 18),
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    marginBottom: 16,
+    borderColor: '#E6E8EE',
+    marginBottom: SPACING.md,
   },
-  tipsTitle: { fontSize: 14, fontWeight: '500', color: '#1a1c1c', marginBottom: 8 },
-  tipItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  tipIcon: { color: '#4555b7', marginRight: 8, fontSize: 16 },
-  tipText: { fontSize: 12, color: '#454652' },
+  tipsTitle: {
+    fontSize: scale(12, 13, 14),
+    fontWeight: '700',
+    color: '#000666',
+    marginBottom: 8,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  tipItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  tipText: {
+    fontSize: scale(11, 12, 13),
+    color: '#4A4A5A',
+    flex: 1,
+  },
+
+  // Map
   mapContainer: {
-    borderRadius: 12,
+    borderRadius: scale(14, 16, 18),
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    marginBottom: 16,
-    height: 160,
-    backgroundColor: '#f0f0f0',
+    borderColor: '#E6E8EE',
+    marginBottom: SPACING.md,
+    height: scale(140, 170, 200),
+    backgroundColor: '#F9FAFC',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -633,143 +759,293 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  mapPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 },
-  mapPlaceholderText: { color: '#767683', fontSize: 14, textAlign: 'center' },
+  mapPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    gap: 8,
+  },
+  mapPlaceholderText: {
+    color: '#8A8A9E',
+    fontSize: scale(12, 13, 14),
+    textAlign: 'center',
+  },
   mapAttribution: {
     position: 'absolute',
     bottom: 4,
     right: 4,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    backgroundColor: 'rgba(255,255,255,0.85)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
   mapAttributionText: { fontSize: 9, color: '#333' },
+
+  // Form sections
   formSection: {
-    backgroundColor: '#ffffff',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: '#fff',
+    padding: SPACING.md,
+    borderRadius: scale(14, 16, 18),
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    marginBottom: 16,
+    borderColor: '#E6E8EE',
+    marginBottom: SPACING.md,
   },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  sectionIcon: { fontSize: 20, marginRight: 8 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1a1c1c' },
-  formGroup: { marginBottom: 12 },
-  label: { fontSize: 14, fontWeight: '500', color: '#1a1c1c', marginBottom: 4 },
-  input: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#c6c5d4',
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+    gap: 8,
+  },
+  sectionIconBox: {
+    width: 28,
+    height: 28,
     borderRadius: 8,
+    backgroundColor: '#F0F2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    fontSize: scale(14, 15, 16),
+    fontWeight: '700',
+    color: '#1a1c1c',
+  },
+  formGroup: { marginBottom: SPACING.sm },
+  label: {
+    fontSize: scale(11, 12, 13),
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 6,
+  },
+  input: {
+    minHeight: scale(44, 48, 52),
+    borderWidth: 1,
+    borderColor: '#DFE1E8',
+    borderRadius: 12,
     paddingHorizontal: 12,
-    backgroundColor: '#f9f9f9',
-    fontSize: 16,
+    paddingVertical: 10,
+    backgroundColor: '#F9FAFC',
+    fontSize: scale(13, 14, 15),
     color: '#1a1c1c',
   },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
+
+  // Category picker
   pickerButton: {
-    height: 48,
+    minHeight: scale(44, 48, 52),
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    borderRadius: 8,
+    borderColor: '#DFE1E8',
+    borderRadius: 12,
     paddingHorizontal: 12,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#F9FAFC',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  pickerText: { fontSize: 16, color: '#1a1c1c' },
-  pickerPlaceholder: { fontSize: 16, color: '#767683' },
-  pickerArrow: { fontSize: 12, color: '#767683' },
+  pickerValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  pickerText: {
+    fontSize: scale(13, 14, 15),
+    color: '#1a1c1c',
+    fontWeight: '600',
+  },
+  pickerPlaceholder: {
+    fontSize: scale(13, 14, 15),
+    color: '#8A8A9E',
+  },
+
+  // Capacity
   capacityContainer: { flexDirection: 'row', alignItems: 'center' },
-  capacityLabel: { position: 'absolute', right: 12, fontSize: 14, color: '#454652' },
-  destinationContainer: { position: 'relative' },
-  searchIcon: { position: 'absolute', left: 12, top: 14, fontSize: 18, color: '#454652', zIndex: 1 },
-  suggestionsContainer: {
-    backgroundColor: '#ffffff',
+  capacityLabel: {
+    position: 'absolute',
+    right: 14,
+    fontSize: scale(12, 13, 14),
+    color: '#8A8A9E',
+    fontWeight: '500',
+  },
+
+  // Destination
+  destinationContainer: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    borderRadius: 8,
+    borderColor: '#DFE1E8',
+    borderRadius: 12,
+    backgroundColor: '#F9FAFC',
+    paddingHorizontal: 12,
+  },
+  destinationIcon: { marginRight: 8 },
+  destinationInput: {
+    flex: 1,
+    fontSize: scale(13, 14, 15),
+    color: '#1a1c1c',
+    paddingVertical: 12,
+  },
+  suggestionsContainer: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#DFE1E8',
+    borderRadius: 12,
     marginTop: 4,
-    maxHeight: 150,
     overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
   },
   suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#F0F0F0',
+    gap: 8,
   },
-  suggestionText: { fontSize: 14, color: '#1a1c1c' },
+  suggestionText: {
+    fontSize: scale(12, 13, 14),
+    color: '#1a1c1c',
+    flex: 1,
+  },
+
+  // Date/time
   datePickerButton: {
-    height: 48,
+    minHeight: scale(44, 48, 52),
     borderWidth: 1,
-    borderColor: '#c6c5d4',
-    borderRadius: 8,
+    borderColor: '#DFE1E8',
+    borderRadius: 12,
     paddingHorizontal: 12,
-    backgroundColor: '#f9f9f9',
-    justifyContent: 'center',
+    backgroundColor: '#F9FAFC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  datePickerText: { fontSize: 16, color: '#1a1c1c' },
-  textArea: { height: 120, paddingTop: 12 },
+  datePickerText: {
+    fontSize: scale(13, 14, 15),
+    color: '#1a1c1c',
+    fontWeight: '500',
+  },
+  textArea: {
+    minHeight: scale(100, 120, 140),
+    textAlignVertical: 'top',
+    paddingTop: 12,
+  },
+
+  // Bottom bar — centered single button
   bottomBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#c6c5d4',
-    padding: 16,
-  },
-  bottomBarContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    maxWidth: 1280,
-    width: '100%',
-    alignSelf: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#E6E8EE',
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
   },
-  bottomBarLeft: { flex: 1 },
-  bottomBarText: { fontSize: 12, color: '#454652' },
-  bottomBarRight: { flexDirection: 'row' },
-  draftButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#000666',
-    marginRight: 8,
-  },
-  draftButtonText: { color: '#000666', fontWeight: '500', fontSize: 14 },
   submitButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 999,
-    backgroundColor: '#1a237e',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: scale(12, 14, 16),
+    paddingHorizontal: SPACING.xl,
+    borderRadius: 12,
+    backgroundColor: '#000666',
+    minWidth: 220,
+    shadowColor: '#000666',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  submitButtonText: { color: '#ffffff', fontWeight: '500', fontSize: 14 },
+  submitButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: scale(14, 15, 16),
+  },
   disabledButton: { opacity: 0.6 },
+
+  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
   },
   modalContent: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    width: '80%',
-    maxHeight: '60%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: SPACING.md,
+    width: '100%',
+    maxWidth: 480,
+    maxHeight: '80%',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
   },
-  modalTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12, color: '#1a1c1c' },
-  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e2e2e2' },
-  modalItemText: { fontSize: 16, color: '#1a1c1c' },
-  modalCloseButton: { marginTop: 12, paddingVertical: 10, alignItems: 'center' },
-  modalCloseText: { color: '#000666', fontWeight: '500', fontSize: 16 },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: SPACING.sm,
+  },
+  modalTitle: {
+    fontSize: scale(16, 17, 18),
+    fontWeight: '700',
+    color: '#1a1c1c',
+  },
+  modalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  modalItemSelected: {
+    backgroundColor: '#F0F2FF',
+  },
+  modalItemIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalItemText: {
+    fontSize: scale(13, 14, 15),
+    color: '#1a1c1c',
+    flex: 1,
+    fontWeight: '500',
+  },
+  modalItemTextSelected: {
+    fontWeight: '700',
+    color: '#000666',
+  },
+  modalCloseButton: {
+    marginTop: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: '#F5F7FA',
+  },
+  modalCloseText: {
+    color: '#000666',
+    fontWeight: '700',
+    fontSize: scale(13, 14, 15),
+  },
 });
-
-export default CreateOpportunityScreen;
