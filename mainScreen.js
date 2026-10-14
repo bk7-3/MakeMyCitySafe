@@ -11,7 +11,6 @@ import {
   Dimensions,
   Animated,
   StatusBar,
-  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text, ActivityIndicator } from 'react-native-paper';
@@ -31,7 +30,6 @@ import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 
-// -------- Responsive helpers --------
 const { height: SCREEN_H } = Dimensions.get('window');
 const isSmallDevice = SCREEN_H < 700;
 const isLargeDevice = SCREEN_H > 850;
@@ -50,7 +48,8 @@ const SPACING = {
   xl: scale(20, 24, 30),
 };
 
-// -------- Default fallback region (used before GPS resolves) --------
+const MAP_HEIGHT = scale(240, 280, 320);
+
 const DEFAULT_REGION = {
   latitude: 37.78825,
   longitude: -122.4324,
@@ -58,7 +57,6 @@ const DEFAULT_REGION = {
   longitudeDelta: 0.05,
 };
 
-// -------- Category config --------
 const CATEGORY_CONFIG = {
   Hazard: {
     base: '#F57C00',
@@ -184,7 +182,6 @@ const MainScreen = ({ navigation }) => {
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [isViewModalVisible, setIsViewModalVisible] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
   const [fabOpen, setFabOpen] = useState(false);
   const fabAnim = useRef(new Animated.Value(0)).current;
 
@@ -459,7 +456,6 @@ const MainScreen = ({ navigation }) => {
     }
   };
 
-  // -------- FIXED: always returns a region --------
   const getMapRegion = () => {
     if (userIsTracking && currentLocation?.coords) {
       return {
@@ -548,426 +544,317 @@ const MainScreen = ({ navigation }) => {
   ];
 
   const HUB_TILES = [
-    {
-      key: 'hazard',
-      label: 'Hazards',
-      icon: 'warning',
-      color: '#F57C00',
-      bg: '#FFF3E0',
-      route: 'Hazard Report',
-    },
-    {
-      key: 'report',
-      label: 'Report',
-      icon: 'add-circle',
-      color: '#D32F2F',
-      bg: '#FFEBEE',
-      route: 'Report Incident',
-    },
-    {
-      key: 'incidents',
-      label: 'Incidents',
-      icon: 'list',
-      color: '#7C3AED',
-      bg: '#F3E5F5',
-      route: 'Incident List',
-    },
-    {
-      key: 'suggest',
-      label: 'Ideas',
-      icon: 'bulb',
-      color: '#6A1B9A',
-      bg: '#F3E5F5',
-      route: 'Suggest List',
-    },
-    {
-      key: 'volunteer',
-      label: 'Volunteer',
-      icon: 'people',
-      color: '#2E7D32',
-      bg: '#E8F5E9',
-      route: 'VolunteerDashboard',
-    },
-    {
-      key: 'ebike',
-      label: 'E-Bike',
-      icon: 'bicycle',
-      color: '#00838F',
-      bg: '#E0F7FA',
-      route: 'E-Bike Safety',
-    },
-    {
-      key: 'sos',
-      label: 'SOS',
-      icon: 'shield-checkmark',
-      color: '#D32F2F',
-      bg: '#FFEBEE',
-      route: 'Help Screen',
-    },
-    {
-      key: 'social',
-      label: 'Social',
-      icon: 'people-circle',
-      color: '#7C3AED',
-      bg: '#F3E5F5',
-      route: 'socialScreen',
-    },
+    { key: 'incidents', label: 'Incidents', icon: 'list', color: '#7C3AED', bg: '#F3E5F5', route: 'Incident List' },
+    { key: 'suggest', label: 'Community', icon: 'bulb', color: '#6A1B9A', bg: '#F3E5F5', route: 'Suggest List' },
+    { key: 'volunteer', label: 'Volunteer', icon: 'people', color: '#2E7D32', bg: '#E8F5E9', route: 'VolunteerDashboard' },
+    { key: 'ebike', label: 'E-Bike', icon: 'bicycle', color: '#00838F', bg: '#E0F7FA', route: 'E-Bike Safety' },
+    { key: 'social', label: 'Social', icon: 'people-circle', color: '#7C3AED', bg: '#F3E5F5', route: 'socialScreen' },
+    { key: 'sos', label: 'SOS', icon: 'shield-checkmark', color: '#D32F2F', bg: '#FFEBEE', route: 'Help Screen' },
   ];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
 
-      <View style={styles.contentWrapper}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* ========== HEADER ========== */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarLabel}>
-                  {getInitials(studentData?.name)}
-                </Text>
-              </View>
-              <View style={styles.headerTextContainer}>
-                <Text style={styles.greetingText}>Welcome back</Text>
-                <Text style={styles.userName} numberOfLines={1}>
-                  {studentData?.name ?? 'User'}
-                </Text>
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled={true}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarLabel}>
+                {getInitials(studentData?.name)}
+              </Text>
+            </View>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.greetingText}>Welcome back</Text>
+              <Text style={styles.userName} numberOfLines={1}>
+                {studentData?.name ?? 'User'}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.emergencyButton}
+            onPress={() => navigation.navigate('Help Screen')}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="shield-checkmark" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.alertsCard}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardTitleRow}>
+              <View style={styles.alertDot} />
+              <Text style={styles.cardTitle}>Live Alerts</Text>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{alerts.length}</Text>
               </View>
             </View>
             <TouchableOpacity
-              style={styles.emergencyButton}
-              onPress={() => navigation.navigate('Help Screen')}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.pillButton}
+              onPress={() => setIsAlertModalVisible(true)}
             >
-              <Ionicons name="shield-checkmark" size={20} color="#fff" />
+              <Ionicons name="add" size={14} color="#000666" />
+              <Text style={styles.pillButtonText}>New</Text>
             </TouchableOpacity>
           </View>
 
-          {/* ========== LIVE ALERTS CARD ========== */}
-          <View style={styles.alertsCard}>
+          {alerts.length === 0 ? (
+            <View style={styles.emptyRow}>
+              <Ionicons name="notifications-off-outline" size={20} color="#999" />
+              <Text style={styles.emptyText}>No alerts at this time</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={alerts.slice(0, 5)}
+              keyExtractor={(item) => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.alertsList}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.alertChip}
+                  onPress={() => {
+                    setSelectedAlert(item);
+                    setIsViewModalVisible(true);
+                  }}
+                >
+                  <View style={styles.alertChipHeader}>
+                    <Ionicons name="warning" size={12} color="#F57C00" />
+                    <Text style={styles.alertChipDate}>
+                      {item.createdDateTime || 'Just now'}
+                    </Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.alertChipText}>
+                    {item.message}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          )}
+        </View>
+
+        {opportunities.length > 0 && (
+          <View style={styles.volunteerCard}>
             <View style={styles.cardHeaderRow}>
               <View style={styles.cardTitleRow}>
-                <View style={styles.alertDot} />
-                <Text style={styles.cardTitle}>Live Alerts</Text>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{alerts.length}</Text>
+                <Ionicons name="people" size={16} color="#2E7D32" />
+                <Text style={[styles.cardTitle, { marginLeft: 6 }]}>
+                  Volunteer
+                </Text>
+                <View style={[styles.badge, { backgroundColor: '#E8F5E9' }]}>
+                  <Text style={[styles.badgeText, { color: '#2E7D32' }]}>
+                    {opportunities.length}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity
                 style={styles.pillButton}
-                onPress={() => setIsAlertModalVisible(true)}
+                onPress={() => navigation.navigate('VolunteerDashboard')}
               >
-                <Ionicons name="add" size={14} color="#000666" />
-                <Text style={styles.pillButtonText}>New</Text>
+                <Text style={styles.pillButtonText}>View All</Text>
+                <Ionicons name="chevron-forward" size={12} color="#000666" />
               </TouchableOpacity>
             </View>
 
-            {alerts.length === 0 ? (
-              <View style={styles.emptyRow}>
-                <Ionicons
-                  name="notifications-off-outline"
-                  size={20}
-                  color="#999"
-                />
-                <Text style={styles.emptyText}>No alerts at this time</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={alerts.slice(0, 5)}
-                keyExtractor={(item) => item.id}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.alertsList}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.alertChip}
-                    onPress={() => {
-                      setSelectedAlert(item);
-                      setIsViewModalVisible(true);
-                    }}
-                  >
-                    <View style={styles.alertChipHeader}>
-                      <Ionicons name="warning" size={12} color="#F57C00" />
-                      <Text style={styles.alertChipDate}>
-                        {item.createdDateTime || 'Just now'}
-                      </Text>
-                    </View>
-                    <Text numberOfLines={2} style={styles.alertChipText}>
-                      {item.message}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              />
-            )}
-          </View>
-
-          {/* ========== VOLUNTEER CARD ========== */}
-          {opportunities.length > 0 && (
-            <View style={styles.volunteerCard}>
-              <View style={styles.cardHeaderRow}>
-                <View style={styles.cardTitleRow}>
-                  <Ionicons name="people" size={16} color="#2E7D32" />
-                  <Text style={[styles.cardTitle, { marginLeft: 6 }]}>
-                    Volunteer
-                  </Text>
-                  <View style={[styles.badge, { backgroundColor: '#E8F5E9' }]}>
-                    <Text style={[styles.badgeText, { color: '#2E7D32' }]}>
-                      {opportunities.length}
-                    </Text>
-                  </View>
+            {opportunities.slice(0, 2).map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.opportunityRow}
+                onPress={() => navigation.navigate('VolunteerDashboard')}
+              >
+                <View style={[styles.oppIconBox, { backgroundColor: '#E8F5E9' }]}>
+                  <Ionicons
+                    name={OPPORTUNITY_ICONS[item.category] || 'pricetag'}
+                    size={16}
+                    color="#2E7D32"
+                  />
                 </View>
-                <TouchableOpacity
-                  style={styles.pillButton}
-                  onPress={() => navigation.navigate('VolunteerDashboard')}
-                >
-                  <Text style={styles.pillButtonText}>View All</Text>
-                  <Ionicons name="chevron-forward" size={12} color="#000666" />
-                </TouchableOpacity>
-              </View>
-
-              {opportunities.slice(0, 2).map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.opportunityRow}
-                  onPress={() => navigation.navigate('VolunteerDashboard')}
-                >
-                  <View
-                    style={[
-                      styles.oppIconBox,
-                      { backgroundColor: '#E8F5E9' },
-                    ]}
-                  >
-                    <Ionicons
-                      name={OPPORTUNITY_ICONS[item.category] || 'pricetag'}
-                      size={16}
-                      color="#2E7D32"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.oppTitleRow}>
-                      <Text numberOfLines={1} style={styles.oppTitle}>
-                        {item.eventName || 'Volunteer Opportunity'}
-                      </Text>
-                      {studentID && item.createdBy === studentID && (
-                        <View style={styles.ownTag}>
-                          <Text style={styles.ownTagText}>Mine</Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.oppMetaRow}>
-                      <Ionicons
-                        name="location-outline"
-                        size={11}
-                        color="#8A8A9E"
-                      />
-                      <Text numberOfLines={1} style={styles.oppMeta}>
-                        {item.destination || 'Campus Area'}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.oppDate}>{formatDate(item.date)}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {/* ========== MAP SECTION ========== */}
-          <View style={styles.mapSection}>
-            <View style={styles.segmentedControl}>
-              {MAP_TABS.map((tab) => {
-                const isActive = activeMapTab === tab.key;
-                const count = tabCounts[tab.key] || 0;
-                return (
-                  <TouchableOpacity
-                    key={tab.key}
-                    style={[
-                      styles.segmentButton,
-                      isActive && styles.segmentButtonActive,
-                    ]}
-                    onPress={() => {
-                      setActiveMapTab(tab.key);
-                      setUserIsTracking(true);
-                    }}
-                  >
-                    <Ionicons
-                      name={tab.icon}
-                      size={13}
-                      color={isActive ? tab.color : '#666'}
-                    />
-                    <Text
-                      style={[
-                        styles.segmentLabel,
-                        isActive && {
-                          color: tab.color,
-                          fontWeight: '700',
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {tab.label}
+                <View style={{ flex: 1 }}>
+                  <View style={styles.oppTitleRow}>
+                    <Text numberOfLines={1} style={styles.oppTitle}>
+                      {item.eventName || 'Volunteer Opportunity'}
                     </Text>
-                    {count > 0 && (
-                      <View
-                        style={[
-                          styles.tabBadge,
-                          isActive && { backgroundColor: tab.color },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.tabBadgeText,
-                            isActive && { color: '#fff' },
-                          ]}
-                        >
-                          {count}
-                        </Text>
+                    {studentID && item.createdBy === studentID && (
+                      <View style={styles.ownTag}>
+                        <Text style={styles.ownTagText}>Mine</Text>
                       </View>
                     )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View
-              style={styles.mapWrapper}
-              onLayout={() => setMapReady(true)}
-            >
-              {!mapReady || loadingLocation ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator
-                    animating={true}
-                    size="large"
-                    color="#000666"
-                  />
-                  <Text style={styles.loadingText}>
-                    {loadingLocation
-                      ? 'Finding your location...'
-                      : 'Preparing map...'}
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  {!userIsTracking && (
-                    <TouchableOpacity
-                      style={styles.recenterButton}
-                      onPress={() => setUserIsTracking(true)}
-                    >
-                      <Ionicons name="locate" size={14} color="#000666" />
-                      <Text style={styles.recenterButtonText}>Recenter</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <MapView
-                    style={styles.map}
-                    region={getMapRegion()}
-                    onPanDrag={() => setUserIsTracking(false)}
-                    showsUserLocation={false}
-                    showsMyLocationButton={false}
-                    showsCompass={false}
-                    toolbarEnabled={false}
-                  >
-                    {currentLocation?.coords && (
-                      <Marker
-                        coordinate={currentLocation.coords}
-                        title="Your Location"
-                      >
-                        <View style={styles.userMarker}>
-                          <View style={styles.userMarkerInner} />
-                        </View>
-                      </Marker>
-                    )}
-
-                    {sosMessages.map((sos) => (
-                      <Marker
-                        key={sos.id}
-                        coordinate={sos.location}
-                        pinColor="red"
-                      >
-                        <Callout
-                          onPress={() =>
-                            navigation.navigate('PinChatScreen', {
-                              hazardId: sos.id,
-                              hazardTitle: 'Emergency SOS',
-                              category: 'SOS',
-                            })
-                          }
-                        >
-                          <View style={styles.calloutBox}>
-                            <Text
-                              style={[
-                                styles.calloutTitle,
-                                { color: '#D32F2F' },
-                              ]}
-                            >
-                              EMERGENCY SOS
-                            </Text>
-                            <Text style={styles.calloutStatus}>
-                              Sent: {sos.createdDateTime}
-                            </Text>
-                            <Text style={styles.calloutDescription}>
-                              {sos.message}
-                            </Text>
-                            <Text style={styles.calloutLink}>
-                              Join Live Chat →
-                            </Text>
-                            <TouchableOpacity
-                              onPress={() => handleResolveSOS(sos.id)}
-                            >
-                              <Text style={styles.deleteLink}>
-                                Resolve & Remove Pin
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </Callout>
-                      </Marker>
-                    ))}
-
-                    {activeMapTab === 'Hazard' &&
-                      mappedHazards.map((h) => renderMarker(h, 'Hazard'))}
-
-                    {activeMapTab === 'Crime' &&
-                      mappedCrimes.map((c) => renderMarker(c, 'Crime'))}
-
-                    {activeMapTab === 'SafeSpace' &&
-                      mappedSafeSpaces.map((s) =>
-                        renderMarker(s, 'SafeSpace')
-                      )}
-                  </MapView>
-                </>
-              )}
-            </View>
-          </View>
-
-          {/* ========== QUICK ACCESS HUB ========== */}
-          <View style={styles.hubSection}>
-            <Text style={styles.hubTitle}>Quick Access</Text>
-            <View style={styles.hubGrid}>
-              {HUB_TILES.map((tile) => (
-                <TouchableOpacity
-                  key={tile.key}
-                  style={styles.hubCard}
-                  onPress={() => navigation.navigate(tile.route)}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[styles.hubIcon, { backgroundColor: tile.bg }]}
-                  >
-                    <Ionicons name={tile.icon} size={22} color={tile.color} />
                   </View>
-                  <Text style={styles.hubLabel}>{tile.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                  <View style={styles.oppMetaRow}>
+                    <Ionicons name="location-outline" size={11} color="#8A8A9E" />
+                    <Text numberOfLines={1} style={styles.oppMeta}>
+                      {item.destination || 'Campus Area'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.oppDate}>{formatDate(item.date)}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        </ScrollView>
-      </View>
+        )}
 
-      {/* ========== FAB ========== */}
+        <View style={styles.segmentedControl}>
+          {MAP_TABS.map((tab) => {
+            const isActive = activeMapTab === tab.key;
+            const count = tabCounts[tab.key] || 0;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[
+                  styles.segmentButton,
+                  isActive && styles.segmentButtonActive,
+                ]}
+                onPress={() => {
+                  setActiveMapTab(tab.key);
+                  setUserIsTracking(true);
+                }}
+              >
+                <Ionicons
+                  name={tab.icon}
+                  size={13}
+                  color={isActive ? tab.color : '#666'}
+                />
+                <Text
+                  style={[
+                    styles.segmentLabel,
+                    isActive && { color: tab.color, fontWeight: '700' },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {tab.label}
+                </Text>
+                {count > 0 && (
+                  <View
+                    style={[
+                      styles.tabBadge,
+                      isActive && { backgroundColor: tab.color },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.tabBadgeText,
+                        isActive && { color: '#fff' },
+                      ]}
+                    >
+                      {count}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={styles.mapSection}>
+          {loadingLocation ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#000666" />
+              <Text style={styles.loadingText}>Finding your location...</Text>
+            </View>
+          ) : (
+            <>
+              {!userIsTracking && (
+                <TouchableOpacity
+                  style={styles.recenterButton}
+                  onPress={() => setUserIsTracking(true)}
+                >
+                  <Ionicons name="locate" size={14} color="#000666" />
+                  <Text style={styles.recenterButtonText}>Recenter</Text>
+                </TouchableOpacity>
+              )}
+
+              <MapView
+                style={styles.map}
+                region={getMapRegion()}
+                onPanDrag={() => setUserIsTracking(false)}
+                mapType="standard"
+              >
+                {currentLocation?.coords && (
+                  <Marker
+                    coordinate={currentLocation.coords}
+                    title="Your Location"
+                  >
+                    <View style={styles.userMarker}>
+                      <View style={styles.userMarkerInner} />
+                    </View>
+                  </Marker>
+                )}
+
+                {sosMessages.map((sos) => (
+                  <Marker key={sos.id} coordinate={sos.location} pinColor="red">
+                    <Callout
+                      onPress={() =>
+                        navigation.navigate('PinChatScreen', {
+                          hazardId: sos.id,
+                          hazardTitle: 'Emergency SOS',
+                          category: 'SOS',
+                        })
+                      }
+                    >
+                      <View style={styles.calloutBox}>
+                        <Text style={[styles.calloutTitle, { color: '#D32F2F' }]}>
+                          EMERGENCY SOS
+                        </Text>
+                        <Text style={styles.calloutStatus}>
+                          Sent: {sos.createdDateTime}
+                        </Text>
+                        <Text style={styles.calloutDescription}>
+                          {sos.message}
+                        </Text>
+                        <Text style={styles.calloutLink}>Join Live Chat →</Text>
+                        <TouchableOpacity
+                          onPress={() => handleResolveSOS(sos.id)}
+                        >
+                          <Text style={styles.deleteLink}>
+                            Resolve & Remove Pin
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </Callout>
+                  </Marker>
+                ))}
+
+                {activeMapTab === 'Hazard' &&
+                  mappedHazards.map((h) => renderMarker(h, 'Hazard'))}
+
+                {activeMapTab === 'Crime' &&
+                  mappedCrimes.map((c) => renderMarker(c, 'Crime'))}
+
+                {activeMapTab === 'SafeSpace' &&
+                  mappedSafeSpaces.map((s) => renderMarker(s, 'SafeSpace'))}
+              </MapView>
+            </>
+          )}
+        </View>
+
+        <View style={styles.hubSection}>
+          <Text style={styles.hubTitle}>Quick Access</Text>
+          <View style={styles.hubGrid}>
+            {HUB_TILES.map((tile) => (
+              <TouchableOpacity
+                key={tile.key}
+                style={styles.hubCard}
+                onPress={() => navigation.navigate(tile.route)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.hubIcon, { backgroundColor: tile.bg }]}>
+                  <Ionicons name={tile.icon} size={22} color={tile.color} />
+                </View>
+                <Text style={styles.hubLabel}>{tile.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        <View style={{ height: insets.bottom + 80 }} />
+      </ScrollView>
+
       <Animated.View
         style={[
           styles.fabContainer,
@@ -978,11 +865,7 @@ const MainScreen = ({ navigation }) => {
         ]}
       >
         <TouchableOpacity style={styles.fab} onPress={toggleFab}>
-          <Ionicons
-            name={fabOpen ? 'close' : 'add'}
-            size={26}
-            color="#fff"
-          />
+          <Ionicons name={fabOpen ? 'close' : 'add'} size={26} color="#fff" />
         </TouchableOpacity>
       </Animated.View>
 
@@ -1034,7 +917,6 @@ const MainScreen = ({ navigation }) => {
         </View>
       )}
 
-      {/* ========== MODALS ========== */}
       <Modal
         visible={isAlertModalVisible}
         transparent
@@ -1083,9 +965,7 @@ const MainScreen = ({ navigation }) => {
                 {isSubmitting ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.modalButtonPrimaryText}>
-                    Post Alert
-                  </Text>
+                  <Text style={styles.modalButtonPrimaryText}>Post Alert</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1158,9 +1038,9 @@ export default MainScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F7FA' },
-  contentWrapper: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: SPACING.md },
 
-  // Header
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1213,7 +1093,6 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
 
-  // Shared card styles
   alertsCard: {
     marginHorizontal: SPACING.md,
     marginTop: SPACING.sm,
@@ -1320,7 +1199,6 @@ const styles = StyleSheet.create({
     color: '#999',
   },
 
-  // Volunteer
   opportunityRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1375,26 +1253,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Map
-  mapSection: {
-    height: scale(260, 320, 380),
-    marginTop: SPACING.sm,
-    marginHorizontal: SPACING.md,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
   segmentedControl: {
     flexDirection: 'row',
-    backgroundColor: '#F5F7FA',
+    backgroundColor: '#E8EEF5',
     padding: 4,
     borderRadius: 12,
-    margin: SPACING.xs,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.sm,
   },
   segmentButton: {
     flex: 1,
@@ -1434,13 +1299,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#666',
   },
-  mapWrapper: { flex: 1, position: 'relative' },
-  map: { width: '100%', height: '100%' },
+
+  mapSection: {
+    height: MAP_HEIGHT,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.sm,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#E8EEF5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F5F7FA',
+    backgroundColor: '#E8EEF5',
   },
   loadingText: {
     marginTop: 10,
@@ -1528,7 +1409,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // Hub
   hubSection: {
     marginTop: SPACING.md,
     paddingHorizontal: SPACING.md,
@@ -1547,7 +1427,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   hubCard: {
-    width: '23.5%',
+    width: '31.5%',
     backgroundColor: '#fff',
     borderRadius: 14,
     paddingVertical: SPACING.sm,
@@ -1575,7 +1455,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // FAB
   fabContainer: {
     position: 'absolute',
     right: SPACING.md,
@@ -1630,7 +1509,6 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
 
-  // Modals
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
