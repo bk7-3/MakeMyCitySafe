@@ -9,22 +9,23 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Image,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
+import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { INCIDENT_TYPES, SEVERITY_LEVELS } from '../constants/incidentTypes';
 
-// LocationIQ token
-const LOCATIONIQ_TOKEN = 'pk.c5f5e38514d66f974793defde833cb25';
+const LOCATIONIQ_TOKEN = process.env.EXPO_PUBLIC_LOCATIONIQ_TOKEN;
 
-const getStaticMapUrl = (lat, lng, zoom = 14, width = 400, height = 200) => {
-  return `https://maps.locationiq.com/v3/staticmap?key=${LOCATIONIQ_TOKEN}&center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&format=png`;
+const formatAddress = (addr) => {
+  const line1 = [addr.streetNumber, addr.street].filter(Boolean).join(' ');
+  return [line1 || addr.name, addr.city, addr.region].filter(Boolean).join(', ');
 };
 
 const ReportIncidentScreen = ({ navigation }) => {
@@ -41,110 +42,132 @@ const ReportIncidentScreen = ({ navigation }) => {
 
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
-  const [mapImageUrl, setMapImageUrl] = useState(null);
-  const [mapLoading, setMapLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const mapRef = useRef(null);
 
   const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [searching, setSearching] = useState(false);
   const debounceTimer = useRef(null);
+  const requestId = useRef(0);
 
   useEffect(() => {
     const user = auth.currentUser;
     if (user) {
       if (user.displayName) {
         setReporterName(user.displayName);
-      }
-      else if (user.email) {
-        const emailPrefix = user.email.split('@')[0];
-        setReporterName(emailPrefix);
+      } else if (user.email) {
+        setReporterName(user.email.split('@')[0]);
       }
     }
-  }, []);
-
-  useEffect(() => {
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
-
-    const query = location.trim();
-    if (query.length < 2) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    setSearching(true);
-    debounceTimer.current = setTimeout(async () => {
-      try {
-        const response = await fetch(
-          `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(query)}&format=json&limit=5`
-        );
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        if (data && data.length > 0) {
-          const items = data.map((item) => ({
-            description: item.display_name,
-            lat: parseFloat(item.lat),
-            lng: parseFloat(item.lon),
-          }));
-          setSuggestions(items);
-          setShowSuggestions(items.length > 0);
-        } else {
-          setSuggestions([]);
-          setShowSuggestions(false);
-        }
-      } catch (error) {
-        console.error('Autocomplete error:', error);
-        setSuggestions([]);
-        setShowSuggestions(false);
-      } finally {
-        setSearching(false);
-      }
-    }, 400);
-
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  }, [location]);
+  }, []);
 
-  const handleSuggestionSelect = (item) => {
-    setLocation(item.description);
-    setLatitude(item.lat);
-    setLongitude(item.lng);
-    const url = getStaticMapUrl(item.lat, item.lng);
-    setMapImageUrl(url);
-    setShowSuggestions(false);
+  // Keep the map centered on the selected coordinates
+  useEffect(() => {
+    if (latitude != null && longitude != null && mapRef.current) {
+      mapRef.current.animateToRegion(
+        { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+        400
+      );
+    }
+  }, [latitude, longitude]);
+
+  const clearSuggestions = () => {
+    requestId.current += 1; // invalidate any in-flight request
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
     setSuggestions([]);
   };
 
-  // Manual geocode
-  const handleManualGeocode = async () => {
-    if (location.trim().length < 3) {
+  const fetchSuggestions = (query) => {
+    const id = ++requestId.current;
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `https://api.locationiq.com/v1/autocomplete?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(
+            query
+          )}&limit=5&format=json`
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (id !== requestId.current) return; // stale response
+        if (Array.isArray(data)) {
+          setSuggestions(
+            data.map((item) => ({
+              description: item.display_name,
+              lat: parseFloat(item.lat),
+              lng: parseFloat(item.lon),
+            }))
+          );
+        } else {
+          setSuggestions([]);
+        }
+      } catch (error) {
+        console.warn('Autocomplete error:', error);
+        if (id === requestId.current) setSuggestions([]);
+      }
+    }, 350);
+  };
+
+  // Only user typing triggers autocomplete; programmatic setLocation calls don't
+  const handleLocationChange = (text) => {
+    setLocation(text);
+    setLatitude(null);
+    setLongitude(null);
+
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    const query = text.trim();
+    if (query.length < 3) {
+      clearSuggestions();
+      return;
+    }
+    fetchSuggestions(query);
+  };
+
+  const handleSuggestionSelect = (item) => {
+    clearSuggestions();
+    Keyboard.dismiss();
+    setLocation(item.description);
+    setLatitude(item.lat);
+    setLongitude(item.lng);
+  };
+
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      if (results.length > 0) {
+        setLocation(formatAddress(results[0]));
+        return;
+      }
+    } catch (e) {
+      console.warn('Reverse geocode error:', e);
+    }
+    setLocation(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+  };
+
+  // Fallback when the user hits return without picking a suggestion
+  const handleSearch = async () => {
+    const query = location.trim();
+    if (query.length < 3) {
       Alert.alert('Please enter a valid address');
       return;
     }
+    clearSuggestions();
+    Keyboard.dismiss();
+    setSearching(true);
     try {
-      const response = await fetch(
-        `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(location)}&format=json&limit=1`
-      );
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (data && data.length > 0) {
-        const item = data[0];
-        const coords = { lat: parseFloat(item.lat), lng: parseFloat(item.lon) };
-        setLatitude(coords.lat);
-        setLongitude(coords.lng);
-        const url = getStaticMapUrl(coords.lat, coords.lng);
-        setMapImageUrl(url);
-        setShowSuggestions(false);
-        Alert.alert('Location found!', 'Map updated with your address.');
+      const results = await Location.geocodeAsync(query);
+      if (results.length > 0) {
+        setLatitude(results[0].latitude);
+        setLongitude(results[0].longitude);
       } else {
         Alert.alert('Location not found', 'Please try a more specific address.');
       }
     } catch (error) {
       console.error('Geocode error:', error);
       Alert.alert('Error', 'Could not find location. Please try again.');
+    } finally {
+      setSearching(false);
     }
   };
 
@@ -155,25 +178,23 @@ const ReportIncidentScreen = ({ navigation }) => {
       return;
     }
     try {
+      clearSuggestions();
       const loc = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = loc.coords;
-      setLatitude(latitude);
-      setLongitude(longitude);
-
-      const address = await Location.reverseGeocodeAsync({ latitude, longitude });
-      if (address.length > 0) {
-        const addr = address[0];
-        const formatted = `${addr.street || ''} ${addr.streetNumber || ''}, ${addr.city || ''}, ${addr.region || ''}`;
-        setLocation(formatted.trim());
-      } else {
-        setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
-      }
-
-      const url = getStaticMapUrl(latitude, longitude);
-      setMapImageUrl(url);
+      const { latitude: lat, longitude: lng } = loc.coords;
+      setLatitude(lat);
+      setLongitude(lng);
+      await reverseGeocode(lat, lng);
     } catch (error) {
       Alert.alert('Error', 'Unable to get current location.');
     }
+  };
+
+  // Tap or drag the pin on the map
+  const handleMapPress = async (coord) => {
+    clearSuggestions();
+    setLatitude(coord.latitude);
+    setLongitude(coord.longitude);
+    await reverseGeocode(coord.latitude, coord.longitude);
   };
 
   const handleSubmit = async () => {
@@ -198,8 +219,11 @@ const ReportIncidentScreen = ({ navigation }) => {
       Alert.alert('Error', 'Please enter a location.');
       return;
     }
-    if (!latitude || !longitude) {
-      Alert.alert('Error', 'Please select a valid location from the suggestions or use "Get Current Location".');
+    if (latitude == null || longitude == null) {
+      Alert.alert(
+        'Error',
+        'Please pick a suggestion, tap the map, or use "Get Current Location".'
+      );
       return;
     }
 
@@ -240,6 +264,8 @@ const ReportIncidentScreen = ({ navigation }) => {
     }
   };
 
+  const hasCoords = latitude != null && longitude != null;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -250,7 +276,7 @@ const ReportIncidentScreen = ({ navigation }) => {
         <View style={{ width: 28 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.form}>
+      <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Your Name *</Text>
           <TextInput
@@ -286,75 +312,76 @@ const ReportIncidentScreen = ({ navigation }) => {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Location *</Text>
           <View style={styles.locationRow}>
-            <View style={styles.locationInputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Start typing an address..."
-                value={location}
-                onChangeText={setLocation}
-                onSubmitEditing={handleManualGeocode}
-                returnKeyType="search"
-              />
-              {showSuggestions && suggestions.length > 0 && (
-                <View style={styles.suggestionsContainer}>
-                  <ScrollView nestedScrollEnabled style={{ maxHeight: 150 }}>
-                    {suggestions.map((item, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={styles.suggestionItem}
-                        onPress={() => handleSuggestionSelect(item)}
-                      >
-                        <Text style={styles.suggestionText} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Start typing an address..."
+              value={location}
+              onChangeText={handleLocationChange}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+              autoCorrect={false}
+            />
+            <TouchableOpacity style={styles.locationButton} onPress={handleSearch}>
+              {searching ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Ionicons name="search" size={24} color="#fff" />
               )}
-            </View>
-            <TouchableOpacity
-              style={styles.locationButton}
-              onPress={getCurrentLocation}
-            >
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.locationButton} onPress={getCurrentLocation}>
               <Ionicons name="locate" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
+
+          {suggestions.length > 0 && (
+            <View style={styles.suggestionsContainer}>
+              {suggestions.map((item, index) => (
+                <TouchableOpacity
+                  key={`${item.lat},${item.lng},${index}`}
+                  style={[
+                    styles.suggestionItem,
+                    index === suggestions.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                  onPress={() => handleSuggestionSelect(item)}
+                >
+                  <Ionicons name="location-outline" size={18} color="#767683" />
+                  <Text style={styles.suggestionText} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.mapContainer}>
-          {searching ? (
-            <View style={styles.mapPlaceholder}>
-              <ActivityIndicator size="large" color="#000666" />
-              <Text style={styles.mapPlaceholderText}>Searching...</Text>
-            </View>
-          ) : mapImageUrl ? (
-            <>
-              <Image
-                source={{ uri: mapImageUrl }}
-                style={styles.mapImage}
-                resizeMode="cover"
-                onLoadStart={() => setMapLoading(true)}
-                onLoadEnd={() => setMapLoading(false)}
-                onError={() => setMapImageUrl(null)}
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            initialRegion={{
+              latitude: 37.0902,
+              longitude: -95.7129,
+              latitudeDelta: 40,
+              longitudeDelta: 40,
+            }}
+            onPress={(e) => handleMapPress(e.nativeEvent.coordinate)}
+            scrollEnabled={false}
+            zoomEnabled={false}
+            rotateEnabled={false}
+            pitchEnabled={false}
+          >
+            {hasCoords && (
+              <Marker
+                coordinate={{ latitude, longitude }}
+                draggable
+                onDragEnd={(e) => handleMapPress(e.nativeEvent.coordinate)}
               />
-              {mapLoading && (
-                <View style={styles.mapLoadingOverlay}>
-                  <ActivityIndicator size="large" color="#000666" />
-                </View>
-              )}
-              <View style={styles.mapAttribution}>
-                <Text style={styles.mapAttributionText}>
-                  Map data © OpenStreetMap, powered by LocationIQ
-                </Text>
-              </View>
-            </>
-          ) : (
-            <View style={styles.mapPlaceholder}>
-              <Text style={styles.mapPlaceholderText}>
-                {location.trim().length === 0
-                  ? 'Enter a location to see the map'
-                  : 'Location not found. Try selecting from suggestions or press "Get Current Location".'}
+            )}
+          </MapView>
+          {!hasCoords && (
+            <View style={styles.mapHint} pointerEvents="none">
+              <Text style={styles.mapHintText}>
+                Search an address, use your location, or tap the map to drop a pin
               </Text>
             </View>
           )}
@@ -363,28 +390,39 @@ const ReportIncidentScreen = ({ navigation }) => {
         <View style={styles.row}>
           <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
             <Text style={styles.label}>Type</Text>
-            <Picker selectedValue={type} onValueChange={setType} style={styles.picker}>
-              {INCIDENT_TYPES.map(t => (
-                <Picker.Item key={t.id} label={t.label} value={t.id} />
-              ))}
-            </Picker>
+            <View style={styles.pickerWrapper}>
+              <Picker
+                selectedValue={type}
+                onValueChange={setType}
+                style={styles.picker}
+                itemStyle={styles.pickerItem}
+              >
+                {INCIDENT_TYPES.map((t) => (
+                  <Picker.Item key={t.id} label={t.label} value={t.id} />
+                ))}
+              </Picker>
+            </View>
           </View>
           <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
             <Text style={styles.label}>Severity</Text>
-            <Picker selectedValue={severity} onValueChange={setSeverity} style={styles.picker}>
-              {SEVERITY_LEVELS.map(s => (
-                <Picker.Item key={s.id} label={s.label} value={s.id} />
-              ))}
-            </Picker>
+            <View style={styles.pickerWrapper}>
+              <Picker
+                selectedValue={severity}
+                onValueChange={setSeverity}
+                style={styles.picker}
+                itemStyle={styles.pickerItem}
+              >
+                {SEVERITY_LEVELS.map((s) => (
+                  <Picker.Item key={s.id} label={s.label} value={s.id} />
+                ))}
+              </Picker>
+            </View>
           </View>
         </View>
 
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Date & Time</Text>
-          <TouchableOpacity
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-          >
+          <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
             <Text style={styles.dateText}>{date.toLocaleDateString()}</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -433,6 +471,8 @@ const ReportIncidentScreen = ({ navigation }) => {
   );
 };
 
+const PICKER_HEIGHT = Platform.OS === 'ios' ? 120 : 50;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9f9f9' },
   header: {
@@ -462,78 +502,72 @@ const styles = StyleSheet.create({
   textArea: { height: 100, textAlignVertical: 'top' },
   locationRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
-  locationInputWrapper: {
-    flex: 1,
-    position: 'relative',
+  locationButton: {
+    backgroundColor: '#000666',
+    width: 46,
+    height: 46,
+    borderRadius: 8,
+    marginLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   suggestionsContainer: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#c6c5d4',
     borderRadius: 8,
-    marginTop: 4,
-    maxHeight: 150,
+    marginTop: 6,
     overflow: 'hidden',
-    position: 'absolute',
-    top: 48,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    elevation: 5,
   },
   suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  suggestionText: { fontSize: 14, color: '#1a1c1c' },
-  locationButton: {
-    backgroundColor: '#000666',
-    padding: 12,
-    borderRadius: 8,
-    marginLeft: 8,
-    alignSelf: 'center',
-  },
+  suggestionText: { flex: 1, fontSize: 14, color: '#1a1c1c', marginLeft: 8 },
   mapContainer: {
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#c6c5d4',
     marginBottom: 16,
-    height: 160,
+    height: 180,
     backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  mapImage: { width: '100%', height: '100%' },
-  mapLoadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 },
-  mapPlaceholderText: { color: '#767683', fontSize: 14, textAlign: 'center' },
-  mapAttribution: {
+  map: { width: '100%', height: '100%' },
+  mapHint: {
     position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    left: 8,
+    right: 8,
+    bottom: 8,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 8,
+    padding: 8,
   },
-  mapAttributionText: { fontSize: 9, color: '#333' },
+  mapHintText: { color: '#767683', fontSize: 13, textAlign: 'center' },
   row: { flexDirection: 'row' },
-  picker: {
+  pickerWrapper: {
+    height: PICKER_HEIGHT,
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    height: 50,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  picker: {
+    width: '100%',
+    height: PICKER_HEIGHT,
+  },
+  pickerItem: {
+    height: PICKER_HEIGHT,
+    fontSize: 16,
+    color: '#1a1c1c',
   },
   dateButton: {
     backgroundColor: '#fff',
