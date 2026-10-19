@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  SafeAreaView,
   StyleSheet,
   View,
   ScrollView,
@@ -7,77 +8,55 @@ import {
   TextInput,
   TouchableOpacity,
   StatusBar,
-  Image,
   Modal,
   Alert,
   Platform,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Dimensions,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Provider, DefaultTheme } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
+import { IconButton, Provider, DefaultTheme } from 'react-native-paper';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import MapView, { Marker } from 'react-native-maps';
 import { db, auth } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// ---------- Responsive helpers ----------
-const { height: SCREEN_H } = Dimensions.get('window');
-const isSmallDevice = SCREEN_H < 700;
-const isLargeDevice = SCREEN_H > 850;
-
-const scale = (small, normal, large) => {
-  if (isSmallDevice) return small;
-  if (isLargeDevice) return large;
-  return normal;
-};
-
-const SPACING = {
-  xs: scale(4, 6, 8),
-  sm: scale(8, 10, 12),
-  md: scale(12, 16, 20),
-  lg: scale(16, 20, 24),
-  xl: scale(20, 24, 28),
-};
-
-// ---------- Theme ----------
+// THEME
 const theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
     primary: '#000666',
     accent: '#000666',
-    background: '#F5F7FA',
+    background: '#f9f9f9',
     surface: '#ffffff',
     text: '#1a1c1c',
-    placeholder: '#8A8A9E',
-    border: '#DFE1E8',
+    placeholder: '#454652',
+    border: '#c6c5d4',
     primaryContainer: '#1a237e',
     onPrimaryContainer: '#ffffff',
   },
 };
 
-// ---------- Categories ----------
-const CATEGORIES = [
-  { label: 'Cleanup', value: 'cleanup', icon: 'leaf', color: '#2E7D32' },
-  { label: 'Safety Training', value: 'safety', icon: 'shield-checkmark', color: '#F9A825' },
-  { label: 'Neighborhood Watch', value: 'neighborhood', icon: 'people', color: '#000666' },
-  { label: 'Education', value: 'education', icon: 'school', color: '#6A1B9A' },
-  { label: 'Public Health', value: 'health', icon: 'heart', color: '#BA1A1A' },
+const categories = [
+  { label: 'Cleanup', value: 'cleanup' },
+  { label: 'Safety Training', value: 'safety' },
+  { label: 'Neighborhood Watch', value: 'neighborhood' },
+  { label: 'Education', value: 'education' },
+  { label: 'Public Health', value: 'health' },
 ];
 
-// ---------- LocationIQ ----------
+// LOCATIONIQ TOKEN (used for address search/autocomplete only; the map itself is Apple Maps on iOS)
 const LOCATIONIQ_TOKEN = 'pk.c5f5e38514d66f974793defde833cb25';
 
-const getStaticMapUrl = (lat, lng, zoom = 14, width = 400, height = 200) => {
-  return `https://maps.locationiq.com/v3/staticmap?key=${LOCATIONIQ_TOKEN}&center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&format=png`;
-};
+const regionFor = (c) => ({
+  latitude: c.lat,
+  longitude: c.lng,
+  latitudeDelta: 0.01,
+  longitudeDelta: 0.01,
+});
 
+// MAIN COMPONENT
 const CreateOpportunityScreen = ({ navigation, route }) => {
-  const insets = useSafeAreaInsets();
-
   const [currentUser, setCurrentUser] = useState(null);
 
   // Form state
@@ -93,38 +72,57 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [mapImageUrl, setMapImageUrl] = useState(null);
-  const [mapLoading, setMapLoading] = useState(false);
   const [coordinates, setCoordinates] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searching, setSearching] = useState(false);
 
   const debounceTimer = useRef(null);
+  const mapRef = useRef(null);
+  const skipSearch = useRef(false); // true right after picking a suggestion, so we don't search again
+  const requestId = useRef(0); // lets us ignore out-of-date autocomplete responses
 
-  // ---------- Auth redirect ----------
+  // redirect if no user
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser(user);
       } else {
-        Alert.alert('Not signed in', 'Please sign in to create an opportunity.');
-        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+        Alert.alert('Not logged in', 'Please sign in to create an opportunity.');
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        });
       }
     });
     return unsubscribe;
   }, []);
 
-  // ---------- Prefill group name ----------
+  // Prefill group name if navigating from a group
   useEffect(() => {
     if (route.params?.groupName) {
       setGroupName(route.params.groupName);
     }
   }, [route.params?.groupName]);
 
-  // ---------- LocationIQ autocomplete ----------
+  // Move the map when a new location is chosen (the map mounts with the first one)
   useEffect(() => {
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (coordinates) {
+      mapRef.current?.animateToRegion(regionFor(coordinates), 400);
+    }
+  }, [coordinates]);
+
+  // Autocomplete suggestions as the user types (LocationIQ Autocomplete API)
+  useEffect(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    // The text just changed because a suggestion was picked: don't reopen the list
+    if (skipSearch.current) {
+      skipSearch.current = false;
+      return;
+    }
 
     const query = destination.trim();
     if (query.length < 2) {
@@ -135,16 +133,25 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
 
     setSearching(true);
     debounceTimer.current = setTimeout(async () => {
+      const id = ++requestId.current;
       try {
         const response = await fetch(
-          `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(
-            query
-          )}&format=json&limit=5`
+          `https://api.locationiq.com/v1/autocomplete?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(query)}&limit=5&dedupe=1&normalizecity=1`
         );
+        if (id !== requestId.current) return; // a newer search or a selection replaced this one
+        if (response.status === 404) {
+          // LocationIQ returns 404 when nothing matches
+          setSuggestions([]);
+          setShowSuggestions(false);
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
+        if (id !== requestId.current) return;
         if (data && data.length > 0) {
           const items = data.map((item) => ({
+            title: item.display_place || item.display_name,
+            subtitle: item.display_address || '',
             description: item.display_name,
             lat: parseFloat(item.lat),
             lng: parseFloat(item.lon),
@@ -160,7 +167,7 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
         if (error.message.includes('401') || error.message.includes('403')) {
           Alert.alert(
             'API Key Error',
-            'Your LocationIQ token is invalid or expired.'
+            'Your LocationIQ token is invalid or expired. Please check your token at locationiq.com'
           );
         }
         setSuggestions([]);
@@ -175,33 +182,35 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     };
   }, [destination]);
 
+  // Handle selection from suggestions
   const handleSuggestionSelect = (item) => {
+    skipSearch.current = true;
+    requestId.current += 1; // drop any in-flight search
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    setSearching(false);
     setDestination(item.description);
     setCoordinates({ lat: item.lat, lng: item.lng });
-    setMapImageUrl(getStaticMapUrl(item.lat, item.lng));
     setShowSuggestions(false);
     setSuggestions([]);
   };
 
+  // manual geocode
   const handleManualGeocode = async () => {
     if (destination.trim().length < 3) {
-      Alert.alert('Invalid address', 'Please enter a valid address.');
+      Alert.alert('Please enter a valid address');
       return;
     }
     try {
       const response = await fetch(
-        `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(
-          destination
-        )}&format=json&limit=1`
+        `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_TOKEN}&q=${encodeURIComponent(destination)}&format=json&limit=1`
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       if (data && data.length > 0) {
         const item = data[0];
-        const coords = { lat: parseFloat(item.lat), lng: parseFloat(item.lon) };
-        setCoordinates(coords);
-        setMapImageUrl(getStaticMapUrl(coords.lat, coords.lng));
+        setCoordinates({ lat: parseFloat(item.lat), lng: parseFloat(item.lon) });
         setShowSuggestions(false);
+        Alert.alert('Location found!', 'Map updated with your address.');
       } else {
         Alert.alert('Location not found', 'Please try a more specific address.');
       }
@@ -211,13 +220,35 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     }
   };
 
-  // ---------- Date/time ----------
-  const formatDate = (d) =>
-    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const formatTime = (d) =>
-    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  // Date / Time
+  const onDateChange = (event, selectedDate) => {
+    const currentDate = selectedDate || date;
+    setShowDatePicker(Platform.OS === 'ios');
+    setDate(currentDate);
+  };
 
-  // ---------- Submit ----------
+  const onTimeChange = (event, selectedTime) => {
+    const currentTime = selectedTime || time;
+    setShowTimePicker(Platform.OS === 'ios');
+    setTime(currentTime);
+  };
+
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  // Submit
   const handleSubmit = async () => {
     if (!eventName || !category || !groupName || !destination || !description) {
       Alert.alert('Missing Fields', 'Please fill in all required fields.');
@@ -230,23 +261,23 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
 
     setLoading(true);
     try {
-      await addDoc(collection(db, 'opportunities'), {
-        eventName: eventName.trim(),
+      const docRef = await addDoc(collection(db, 'opportunities'), {
+        eventName,
         category,
-        groupName: groupName.trim(),
+        groupName,
         capacity: parseInt(capacity) || 0,
-        destination: destination.trim(),
+        destination,
         date: date.toISOString(),
         time: time.toISOString(),
-        description: description.trim(),
+        description,
         coordinates,
         createdAt: new Date().toISOString(),
         createdBy: currentUser.uid,
         groupId: route.params?.groupId || null,
       });
-      Alert.alert('Success', 'Opportunity posted successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      console.log('Opportunity created with ID:', docRef.id);
+      Alert.alert('Success', 'Opportunity posted successfully!');
+      navigation.goBack();
     } catch (error) {
       console.error('Error creating opportunity:', error);
       Alert.alert('Error', 'Failed to post opportunity. Please try again.');
@@ -255,389 +286,296 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
     }
   };
 
-  const getCategoryInfo = () =>
-    CATEGORIES.find((c) => c.value === category) || null;
+  const handleSaveDraft = () => {
+    Alert.alert('Draft Saved', 'Your opportunity has been saved as a draft.');
+  };
 
+  // RENDER
   return (
     <Provider theme={theme}>
-      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#f9f9f9" />
 
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="close" size={26} color="#000666" />
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeButton}>
+            <IconButton icon="close" size={24} color="#000666" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>New Opportunity</Text>
-          <View style={{ width: 26 }} />
+          <View style={{ width: 48 }} />
         </View>
 
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <ScrollView
-            contentContainerStyle={[
-              styles.scrollContent,
-              { paddingBottom: insets.bottom + 100 },
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Impact card */}
-            <View style={styles.impactCard}>
-              <View style={styles.impactHeader}>
-                <Ionicons name="sparkles" size={20} color="#fff" />
-                <Text style={styles.impactTitle}>Community Impact</Text>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Community Impact Card */}
+          <View style={styles.impactCard}>
+            <Text style={styles.impactTitle}>Community Impact</Text>
+            <Text style={styles.impactText}>
+              Creating a new opportunity helps mobilize local volunteers. Be clear about your goals
+              to attract the best matching help.
+            </Text>
+          </View>
+
+          {/* Posting Tips */}
+          <View style={styles.tipsCard}>
+            <Text style={styles.tipsTitle}>Posting Tips</Text>
+            <View style={styles.tipItem}>
+              <Text style={styles.tipIcon}>✓</Text>
+              <Text style={styles.tipText}>Use high-quality images for your event header.</Text>
+            </View>
+            <View style={styles.tipItem}>
+              <Text style={styles.tipIcon}>✓</Text>
+              <Text style={styles.tipText}>Clearly state the required skills if any.</Text>
+            </View>
+            <View style={styles.tipItem}>
+              <Text style={styles.tipIcon}>✓</Text>
+              <Text style={styles.tipText}>Double-check the meeting coordinates.</Text>
+            </View>
+          </View>
+
+          {/* Map preview (Apple Maps on iOS) */}
+          <View style={styles.mapContainer}>
+            {coordinates ? (
+              <MapView
+                ref={mapRef}
+                style={styles.mapImage}
+                initialRegion={regionFor(coordinates)}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                toolbarEnabled={false}
+              >
+                <Marker
+                  coordinate={{ latitude: coordinates.lat, longitude: coordinates.lng }}
+                  title={destination}
+                />
+              </MapView>
+            ) : (
+              <View style={styles.mapPlaceholder}>
+                <Text style={styles.mapPlaceholderText}>
+                  {destination.trim().length === 0
+                    ? 'Enter a destination to see the map'
+                    : 'Select a suggestion or press "Search" on the keyboard to preview the location.'}
+                </Text>
               </View>
-              <Text style={styles.impactText}>
-                Creating a new opportunity helps mobilize local volunteers. Be clear
-                about your goals to attract the best matching help.
-              </Text>
+            )}
+            {searching && (
+              <View style={styles.mapLoadingOverlay}>
+                <ActivityIndicator size="large" color="#000666" />
+              </View>
+            )}
+          </View>
+
+          {/* Event Details */}
+          <View style={styles.formSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>ℹ️</Text>
+              <Text style={styles.sectionTitle}>Event Details</Text>
             </View>
 
-            {/* Tips card */}
-            <View style={styles.tipsCard}>
-              <Text style={styles.tipsTitle}>Posting Tips</Text>
-              {[
-                'Use high-quality images for your event header.',
-                'Clearly state the required skills if any.',
-                'Double-check the meeting coordinates.',
-              ].map((tip, i) => (
-                <View key={i} style={styles.tipItem}>
-                  <Ionicons name="checkmark-circle" size={14} color="#4555b7" />
-                  <Text style={styles.tipText}>{tip}</Text>
-                </View>
-              ))}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Event Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Park Cleanup Day"
+                value={eventName}
+                onChangeText={setEventName}
+                placeholderTextColor="#767683"
+              />
             </View>
 
-            {/* Map preview */}
-            <View style={styles.mapContainer}>
-              {searching ? (
-                <View style={styles.mapPlaceholder}>
-                  <ActivityIndicator size="large" color="#000666" />
-                  <Text style={styles.mapPlaceholderText}>Searching...</Text>
-                </View>
-              ) : mapImageUrl ? (
-                <>
-                  <Image
-                    source={{ uri: mapImageUrl }}
-                    style={styles.mapImage}
-                    resizeMode="cover"
-                    onLoadStart={() => setMapLoading(true)}
-                    onLoadEnd={() => setMapLoading(false)}
-                    onError={() => setMapImageUrl(null)}
-                  />
-                  {mapLoading && (
-                    <View style={styles.mapLoadingOverlay}>
-                      <ActivityIndicator size="large" color="#000666" />
-                    </View>
-                  )}
-                  <View style={styles.mapAttribution}>
-                    <Text style={styles.mapAttributionText}>
-                      Map data © OpenStreetMap · LocationIQ
-                    </Text>
-                  </View>
-                </>
-              ) : (
-                <View style={styles.mapPlaceholder}>
-                  <Ionicons name="map-outline" size={32} color="#B0B3BF" />
-                  <Text style={styles.mapPlaceholderText}>
-                    {destination.trim().length === 0
-                      ? 'Enter a destination to see the map'
-                      : 'Location not found. Try selecting from suggestions.'}
+            <View style={styles.row}>
+              <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.label}>Category</Text>
+                <TouchableOpacity
+                  style={styles.pickerButton}
+                  onPress={() => setShowCategoryModal(true)}
+                >
+                  <Text style={category ? styles.pickerText : styles.pickerPlaceholder}>
+                    {category ? categories.find(c => c.value === category)?.label : 'Select category'}
                   </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Event Details */}
-            <View style={styles.formSection}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconBox}>
-                  <Ionicons name="information-circle" size={16} color="#000666" />
-                </View>
-                <Text style={styles.sectionTitle}>Event Details</Text>
+                  <Text style={styles.pickerArrow}>▼</Text>
+                </TouchableOpacity>
               </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Event Name *</Text>
+              <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.label}>Group Name</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="e.g. Park Cleanup Day"
-                  value={eventName}
-                  onChangeText={setEventName}
-                  placeholderTextColor="#8A8A9E"
+                  placeholder="e.g. Green Earth Society"
+                  value={groupName}
+                  onChangeText={setGroupName}
+                  placeholderTextColor="#767683"
                 />
-              </View>
-
-              <View style={styles.row}>
-                <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
-                  <Text style={styles.label}>Category *</Text>
-                  <TouchableOpacity
-                    style={styles.pickerButton}
-                    onPress={() => setShowCategoryModal(true)}
-                    activeOpacity={0.8}
-                  >
-                    {category ? (
-                      <View style={styles.pickerValueRow}>
-                        <Ionicons
-                          name={getCategoryInfo()?.icon || 'pricetag'}
-                          size={16}
-                          color={getCategoryInfo()?.color || '#000666'}
-                        />
-                        <Text style={styles.pickerText}>
-                          {getCategoryInfo()?.label}
-                        </Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.pickerPlaceholder}>Select category</Text>
-                    )}
-                    <Ionicons name="chevron-down" size={16} color="#767683" />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.label}>Group Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="e.g. Green Earth"
-                    value={groupName}
-                    onChangeText={setGroupName}
-                    placeholderTextColor="#8A8A9E"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Volunteer Capacity</Text>
-                <View style={styles.capacityContainer}>
-                  <TextInput
-                    style={[styles.input, { flex: 1, paddingRight: 70 }]}
-                    placeholder="0"
-                    value={capacity}
-                    onChangeText={setCapacity}
-                    keyboardType="numeric"
-                    placeholderTextColor="#8A8A9E"
-                  />
-                  <Text style={styles.capacityLabel}>people</Text>
-                </View>
               </View>
             </View>
 
-            {/* Where & When */}
-            <View style={styles.formSection}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconBox}>
-                  <Ionicons name="location" size={16} color="#000666" />
-                </View>
-                <Text style={styles.sectionTitle}>Where & When</Text>
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Volunteer Capacity</Text>
+              <View style={styles.capacityContainer}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="0"
+                  value={capacity}
+                  onChangeText={setCapacity}
+                  keyboardType="numeric"
+                  placeholderTextColor="#767683"
+                />
+                <Text style={styles.capacityLabel}>People</Text>
               </View>
+            </View>
+          </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Meeting Destination *</Text>
-                <View style={styles.destinationContainer}>
-                  <Ionicons
-                    name="search"
-                    size={16}
-                    color="#767683"
-                    style={styles.destinationIcon}
-                  />
-                  <TextInput
-                    style={styles.destinationInput}
-                    placeholder="Start typing an address or landmark..."
-                    value={destination}
-                    onChangeText={setDestination}
-                    onSubmitEditing={handleManualGeocode}
-                    returnKeyType="search"
-                    placeholderTextColor="#8A8A9E"
-                  />
-                </View>
+          {/* Where & When */}
+          <View style={styles.formSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>📍</Text>
+              <Text style={styles.sectionTitle}>Where & When</Text>
+            </View>
 
-                {showSuggestions && suggestions.length > 0 && (
-                  <View style={styles.suggestionsContainer}>
-                    <ScrollView
-                      nestedScrollEnabled
-                      keyboardShouldPersistTaps="handled"
-                      style={{ maxHeight: 160 }}
-                    >
-                      {suggestions.map((item, index) => (
-                        <TouchableOpacity
-                          key={index}
-                          style={styles.suggestionItem}
-                          onPress={() => handleSuggestionSelect(item)}
-                        >
-                          <Ionicons name="location-outline" size={14} color="#767683" />
-                          <Text style={styles.suggestionText} numberOfLines={2}>
-                            {item.description}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Meeting Destination</Text>
+              <View style={styles.destinationContainer}>
+                <Text style={styles.searchIcon}>🔍</Text>
+                <TextInput
+                  style={[styles.input, { borderWidth: 0, paddingLeft: 36 }]}
+                  placeholder="Start typing an address or landmark..."
+                  value={destination}
+                  onChangeText={setDestination}
+                  onSubmitEditing={handleManualGeocode}
+                  returnKeyType="search"
+                  placeholderTextColor="#767683"
+                />
+              </View>
+              {/* Suggestions dropdown */}
+              {showSuggestions && suggestions.length > 0 && (
+                <View style={styles.suggestionsContainer}>
+                  <ScrollView style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+                    {suggestions.map((item, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.suggestionItem}
+                        onPress={() => handleSuggestionSelect(item)}
+                      >
+                        <Text style={styles.suggestionTitle} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        {!!item.subtitle && (
+                          <Text style={styles.suggestionSubtitle} numberOfLines={1}>
+                            {item.subtitle}
                           </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.row}>
+              <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={styles.label}>Meeting Date</Text>
+                <TouchableOpacity
+                  style={styles.datePickerButton}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={styles.datePickerText}>{formatDate(date)}</Text>
+                </TouchableOpacity>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={date}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={onDateChange}
+                  />
                 )}
               </View>
-
-              <View style={styles.row}>
-                <View style={[styles.formGroup, { flex: 1, marginRight: 8 }]}>
-                  <Text style={styles.label}>Meeting Date</Text>
-                  <TouchableOpacity
-                    style={styles.datePickerButton}
-                    onPress={() => setShowDatePicker(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="calendar-outline" size={16} color="#000666" />
-                    <Text style={styles.datePickerText}>{formatDate(date)}</Text>
-                  </TouchableOpacity>
-                  {showDatePicker && (
-                    <DateTimePicker
-                      value={date}
-                      mode="date"
-                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                      onChange={(event, selected) => {
-                        setShowDatePicker(false);
-                        if (selected) setDate(selected);
-                      }}
-                    />
-                  )}
-                </View>
-
-                <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.label}>Meeting Time</Text>
-                  <TouchableOpacity
-                    style={styles.datePickerButton}
-                    onPress={() => setShowTimePicker(true)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="time-outline" size={16} color="#000666" />
-                    <Text style={styles.datePickerText}>{formatTime(time)}</Text>
-                  </TouchableOpacity>
-                  {showTimePicker && (
-                    <DateTimePicker
-                      value={time}
-                      mode="time"
-                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                      onChange={(event, selected) => {
-                        setShowTimePicker(false);
-                        if (selected) setTime(selected);
-                      }}
-                    />
-                  )}
-                </View>
+              <View style={[styles.formGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={styles.label}>Meeting Time</Text>
+                <TouchableOpacity
+                  style={styles.datePickerButton}
+                  onPress={() => setShowTimePicker(true)}
+                >
+                  <Text style={styles.datePickerText}>{formatTime(time)}</Text>
+                </TouchableOpacity>
+                {showTimePicker && (
+                  <DateTimePicker
+                    value={time}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={onTimeChange}
+                  />
+                )}
               </View>
             </View>
-
-            {/* Mission & Goals */}
-            <View style={styles.formSection}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconBox}>
-                  <Ionicons name="document-text" size={16} color="#000666" />
-                </View>
-                <Text style={styles.sectionTitle}>Mission & Goals</Text>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Meeting Goal / Description *</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  placeholder="Describe the impact of this event and what volunteers will be doing..."
-                  value={description}
-                  onChangeText={setDescription}
-                  multiline
-                  numberOfLines={5}
-                  textAlignVertical="top"
-                  placeholderTextColor="#8A8A9E"
-                />
-              </View>
-            </View>
-          </ScrollView>
-
-          {/* Bottom Action Bar — centered with single Post button */}
-          <View
-            style={[
-              styles.bottomBar,
-              { paddingBottom: Math.max(insets.bottom, SPACING.sm) },
-            ]}
-          >
-            <TouchableOpacity
-              style={[styles.submitButton, loading && styles.disabledButton]}
-              onPress={handleSubmit}
-              disabled={loading}
-              activeOpacity={0.85}
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Text style={styles.submitButtonText}>Post Opportunity</Text>
-                  <Ionicons name="arrow-forward" size={16} color="#fff" />
-                </>
-              )}
-            </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+
+          {/* Mission and Goals */}
+          <View style={styles.formSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>📝</Text>
+              <Text style={styles.sectionTitle}>Mission & Goals</Text>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Meeting Goal / Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Describe the impact of this event and what volunteers will be doing..."
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+                placeholderTextColor="#767683"
+              />
+            </View>
+          </View>
+
+          <View style={{ height: 100 }} />
+        </ScrollView>
+
+        {/* Bottom action bar */}
+        <View style={styles.bottomBar}>
+          <View style={styles.bottomBarContent}>
+            <View style={styles.bottomBarRight}>
+              <TouchableOpacity style={styles.draftButton} onPress={handleSaveDraft}>
+                <Text style={styles.draftButtonText}>Save as Draft</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.submitButton, loading && styles.disabledButton]}
+                onPress={handleSubmit}
+                disabled={loading}
+              >
+                <Text style={styles.submitButtonText}>
+                  {loading ? 'Posting...' : 'Post Opportunity'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
         {/* Category Modal */}
         <Modal
           visible={showCategoryModal}
           transparent
-          animationType="fade"
-          statusBarTranslucent
+          animationType="slide"
           onRequestClose={() => setShowCategoryModal(false)}
         >
-          <View
-            style={[
-              styles.modalOverlay,
-              { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
-            ]}
-          >
+          <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Ionicons name="pricetag" size={22} color="#000666" />
-                <Text style={styles.modalTitle}>Select Category</Text>
-              </View>
-
-              {CATEGORIES.map((item) => {
-                const isSelected = category === item.value;
-                return (
-                  <TouchableOpacity
-                    key={item.value}
-                    style={[
-                      styles.modalItem,
-                      isSelected && styles.modalItemSelected,
-                    ]}
-                    onPress={() => {
-                      setCategory(item.value);
-                      setShowCategoryModal(false);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View
-                      style={[
-                        styles.modalItemIcon,
-                        { backgroundColor: `${item.color}20` },
-                      ]}
-                    >
-                      <Ionicons name={item.icon} size={18} color={item.color} />
-                    </View>
-                    <Text
-                      style={[
-                        styles.modalItemText,
-                        isSelected && styles.modalItemTextSelected,
-                      ]}
-                    >
-                      {item.label}
-                    </Text>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color="#000666" />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-
+              <Text style={styles.modalTitle}>Select Category</Text>
+              {categories.map((item) => (
+                <TouchableOpacity
+                  key={item.value}
+                  style={styles.modalItem}
+                  onPress={() => {
+                    setCategory(item.value);
+                    setShowCategoryModal(false);
+                  }}
+                >
+                  <Text style={styles.modalItemText}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => setShowCategoryModal(false)}
@@ -652,103 +590,56 @@ const CreateOpportunityScreen = ({ navigation, route }) => {
   );
 };
 
-export default CreateOpportunityScreen;
-
-// ---------- Styles ----------
+// STYLES
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F7FA' },
-
-  // Header
+  container: { flex: 1, backgroundColor: '#f9f9f9' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    backgroundColor: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#E6E8EE',
+    borderBottomColor: '#e2e2e2',
   },
+  closeButton: { marginLeft: -8 },
   headerTitle: {
-    fontSize: scale(16, 18, 20),
+    fontSize: 20,
     fontWeight: '700',
     color: '#000666',
     flex: 1,
     textAlign: 'center',
   },
-
-  scrollContent: {
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
-  },
-
-  // Impact card
+  scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
   impactCard: {
-    backgroundColor: '#000666',
-    padding: SPACING.md,
-    borderRadius: scale(14, 16, 18),
-    marginBottom: SPACING.md,
-    shadowColor: '#000666',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: '#1a237e',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
   },
-  impactHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-    gap: 8,
-  },
-  impactTitle: {
-    fontSize: scale(14, 15, 16),
-    fontWeight: '700',
-    color: '#fff',
-  },
-  impactText: {
-    fontSize: scale(12, 13, 14),
-    color: '#E0E0FF',
-    lineHeight: scale(18, 20, 22),
-  },
-
-  // Tips
+  impactTitle: { fontSize: 18, fontWeight: '600', color: '#ffffff', marginBottom: 4 },
+  impactText: { fontSize: 16, color: '#e0e0ff', lineHeight: 24 },
   tipsCard: {
-    backgroundColor: '#fff',
-    padding: SPACING.md,
-    borderRadius: scale(14, 16, 18),
+    backgroundColor: '#ffffff',
+    padding: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E6E8EE',
-    marginBottom: SPACING.md,
+    borderColor: '#c6c5d4',
+    marginBottom: 16,
   },
-  tipsTitle: {
-    fontSize: scale(12, 13, 14),
-    fontWeight: '700',
-    color: '#000666',
-    marginBottom: 8,
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  tipItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-    gap: 8,
-  },
-  tipText: {
-    fontSize: scale(11, 12, 13),
-    color: '#4A4A5A',
-    flex: 1,
-  },
-
-  // Map
+  tipsTitle: { fontSize: 14, fontWeight: '500', color: '#1a1c1c', marginBottom: 8 },
+  tipItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  tipIcon: { color: '#4555b7', marginRight: 8, fontSize: 16 },
+  tipText: { fontSize: 12, color: '#454652' },
   mapContainer: {
-    borderRadius: scale(14, 16, 18),
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#E6E8EE',
-    marginBottom: SPACING.md,
-    height: scale(140, 170, 200),
-    backgroundColor: '#F9FAFC',
+    borderColor: '#c6c5d4',
+    marginBottom: 16,
+    height: 160,
+    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -759,293 +650,132 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-    gap: 8,
-  },
-  mapPlaceholderText: {
-    color: '#8A8A9E',
-    fontSize: scale(12, 13, 14),
-    textAlign: 'center',
-  },
-  mapAttribution: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  mapAttributionText: { fontSize: 9, color: '#333' },
-
-  // Form sections
+  mapPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 },
+  mapPlaceholderText: { color: '#767683', fontSize: 14, textAlign: 'center' },
   formSection: {
-    backgroundColor: '#fff',
-    padding: SPACING.md,
-    borderRadius: scale(14, 16, 18),
-    borderWidth: 1,
-    borderColor: '#E6E8EE',
-    marginBottom: SPACING.md,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-    gap: 8,
-  },
-  sectionIconBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#F0F2FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionTitle: {
-    fontSize: scale(14, 15, 16),
-    fontWeight: '700',
-    color: '#1a1c1c',
-  },
-  formGroup: { marginBottom: SPACING.sm },
-  label: {
-    fontSize: scale(11, 12, 13),
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-  },
-  input: {
-    minHeight: scale(44, 48, 52),
-    borderWidth: 1,
-    borderColor: '#DFE1E8',
+    backgroundColor: '#ffffff',
+    padding: 16,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c6c5d4',
+    marginBottom: 16,
+  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  sectionIcon: { fontSize: 20, marginRight: 8 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1a1c1c' },
+  formGroup: { marginBottom: 12 },
+  label: { fontSize: 14, fontWeight: '500', color: '#1a1c1c', marginBottom: 4 },
+  input: {
+    height: 48,
+    borderWidth: 1,
+    borderColor: '#c6c5d4',
+    borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#F9FAFC',
-    fontSize: scale(13, 14, 15),
+    backgroundColor: '#f9f9f9',
+    fontSize: 16,
     color: '#1a1c1c',
   },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
-
-  // Category picker
   pickerButton: {
-    minHeight: scale(44, 48, 52),
+    height: 48,
     borderWidth: 1,
-    borderColor: '#DFE1E8',
-    borderRadius: 12,
+    borderColor: '#c6c5d4',
+    borderRadius: 8,
     paddingHorizontal: 12,
-    backgroundColor: '#F9FAFC',
+    backgroundColor: '#f9f9f9',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  pickerValueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  pickerText: {
-    fontSize: scale(13, 14, 15),
-    color: '#1a1c1c',
-    fontWeight: '600',
-  },
-  pickerPlaceholder: {
-    fontSize: scale(13, 14, 15),
-    color: '#8A8A9E',
-  },
-
-  // Capacity
+  pickerText: { fontSize: 16, color: '#1a1c1c' },
+  pickerPlaceholder: { fontSize: 16, color: '#767683' },
+  pickerArrow: { fontSize: 12, color: '#767683' },
   capacityContainer: { flexDirection: 'row', alignItems: 'center' },
-  capacityLabel: {
-    position: 'absolute',
-    right: 14,
-    fontSize: scale(12, 13, 14),
-    color: '#8A8A9E',
-    fontWeight: '500',
-  },
-
-  // Destination
-  destinationContainer: {
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#DFE1E8',
-    borderRadius: 12,
-    backgroundColor: '#F9FAFC',
-    paddingHorizontal: 12,
-  },
-  destinationIcon: { marginRight: 8 },
-  destinationInput: {
-    flex: 1,
-    fontSize: scale(13, 14, 15),
-    color: '#1a1c1c',
-    paddingVertical: 12,
-  },
+  capacityLabel: { position: 'absolute', right: 12, fontSize: 14, color: '#454652' },
+  destinationContainer: { position: 'relative' },
+  searchIcon: { position: 'absolute', left: 12, top: 14, fontSize: 18, color: '#454652', zIndex: 1 },
   suggestionsContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#DFE1E8',
-    borderRadius: 12,
+    borderColor: '#c6c5d4',
+    borderRadius: 8,
     marginTop: 4,
+    maxHeight: 150,
     overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
   },
   suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    gap: 8,
+    borderBottomColor: '#f0f0f0',
   },
-  suggestionText: {
-    fontSize: scale(12, 13, 14),
-    color: '#1a1c1c',
-    flex: 1,
-  },
-
-  // Date/time
+  suggestionTitle: { fontSize: 14, fontWeight: '600', color: '#1a1c1c' },
+  suggestionSubtitle: { fontSize: 12, color: '#767683', marginTop: 2 },
   datePickerButton: {
-    minHeight: scale(44, 48, 52),
+    height: 48,
     borderWidth: 1,
-    borderColor: '#DFE1E8',
-    borderRadius: 12,
+    borderColor: '#c6c5d4',
+    borderRadius: 8,
     paddingHorizontal: 12,
-    backgroundColor: '#F9FAFC',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    backgroundColor: '#f9f9f9',
+    justifyContent: 'center',
   },
-  datePickerText: {
-    fontSize: scale(13, 14, 15),
-    color: '#1a1c1c',
-    fontWeight: '500',
-  },
-  textArea: {
-    minHeight: scale(100, 120, 140),
-    textAlignVertical: 'top',
-    paddingTop: 12,
-  },
-
-  // Bottom bar — centered single button
+  datePickerText: { fontSize: 16, color: '#1a1c1c' },
+  textArea: { height: 120, paddingTop: 12 },
   bottomBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#E6E8EE',
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.sm,
+    borderTopColor: '#c6c5d4',
+    padding: 16,
   },
-  submitButton: {
+  bottomBarContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: scale(12, 14, 16),
-    paddingHorizontal: SPACING.xl,
-    borderRadius: 12,
-    backgroundColor: '#000666',
-    minWidth: 220,
-    shadowColor: '#000666',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 3,
+    justifyContent: 'space-between',
+    maxWidth: 1280,
+    width: '100%',
+    alignSelf: 'center',
   },
-  submitButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: scale(14, 15, 16),
+  bottomBarRight: { flexDirection: 'row' },
+  draftButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#000666',
+    marginRight: 8,
   },
+  draftButtonText: { color: '#000666', fontWeight: '500', fontSize: 14 },
+  submitButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 999,
+    backgroundColor: '#1a237e',
+  },
+  submitButtonText: { color: '#ffffff', fontWeight: '500', fontSize: 14 },
   disabledButton: { opacity: 0.6 },
-
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: SPACING.lg,
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: SPACING.md,
-    width: '100%',
-    maxWidth: 480,
-    maxHeight: '80%',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: SPACING.sm,
-  },
-  modalTitle: {
-    fontSize: scale(16, 17, 18),
-    fontWeight: '700',
-    color: '#1a1c1c',
-  },
-  modalItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: 8,
+    backgroundColor: '#ffffff',
     borderRadius: 12,
-    marginBottom: 4,
+    padding: 20,
+    width: '80%',
+    maxHeight: '60%',
   },
-  modalItemSelected: {
-    backgroundColor: '#F0F2FF',
-  },
-  modalItemIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalItemText: {
-    fontSize: scale(13, 14, 15),
-    color: '#1a1c1c',
-    flex: 1,
-    fontWeight: '500',
-  },
-  modalItemTextSelected: {
-    fontWeight: '700',
-    color: '#000666',
-  },
-  modalCloseButton: {
-    marginTop: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    alignItems: 'center',
-    borderRadius: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  modalCloseText: {
-    color: '#000666',
-    fontWeight: '700',
-    fontSize: scale(13, 14, 15),
-  },
+  modalTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12, color: '#1a1c1c' },
+  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e2e2e2' },
+  modalItemText: { fontSize: 16, color: '#1a1c1c' },
+  modalCloseButton: { marginTop: 12, paddingVertical: 10, alignItems: 'center' },
+  modalCloseText: { color: '#000666', fontWeight: '500', fontSize: 16 },
 });
+
+export default CreateOpportunityScreen;
