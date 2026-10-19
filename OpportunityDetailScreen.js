@@ -7,17 +7,16 @@ import {
   Text,
   TouchableOpacity,
   StatusBar,
-  Image,
-  Modal,
   Alert,
-  ActivityIndicator,
   Linking,
+  Platform,
 } from 'react-native';
 import { IconButton, Provider, DefaultTheme } from 'react-native-paper';
-import { doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
+import MapView, { Marker } from 'react-native-maps';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../firebase';
 
-// THEME 
+// THEME
 const theme = {
   ...DefaultTheme,
   colors: {
@@ -34,31 +33,22 @@ const theme = {
   },
 };
 
-//  LOCATIONIQ TOKEN
-const LOCATIONIQ_TOKEN = 'pk.c5f5e38514d66f974793defde833cb25';
-
-// Static map URL generator
-const getStaticMapUrl = (lat, lng, zoom = 14, width = 400, height = 200) => {
-  return `https://maps.locationiq.com/v3/staticmap?key=${LOCATIONIQ_TOKEN}&center=${lat},${lng}&zoom=${zoom}&size=${width}x${height}&format=png`;
-};
-
-//  MAIN COMPONENT 
+// MAIN COMPONENT
 const OpportunityDetailScreen = ({ route, navigation }) => {
-  const { opportunity } = route.params; 
+  const { opportunity } = route.params;
   const [registered, setRegistered] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [mapImageUrl, setMapImageUrl] = useState(null);
-  const [mapLoading, setMapLoading] = useState(false);
 
-  const currentUserId = 'demo-user-id'; 
+  const currentUserId = 'demo-user-id';
+
+  // Coordinates for the map preview (null if missing/invalid)
+  const lat = Number(opportunity.coordinates?.lat);
+  const lng = Number(opportunity.coordinates?.lng);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
   useEffect(() => {
     if (opportunity.registrations && opportunity.registrations.includes(currentUserId)) {
       setRegistered(true);
-    }
-    if (opportunity.coordinates) {
-      const url = getStaticMapUrl(opportunity.coordinates.lat, opportunity.coordinates.lng);
-      setMapImageUrl(url);
     }
   }, []);
 
@@ -84,7 +74,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
       (c) => c.value === opportunity.category
     )?.label || opportunity.category;
 
-  //  Registration toggle 
+  // Registration toggle
   const handleRegister = async () => {
     setLoading(true);
     try {
@@ -111,22 +101,19 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   };
 
   const openInMaps = () => {
-    if (opportunity.coordinates) {
-      const { lat, lng } = opportunity.coordinates;
-      const label = encodeURIComponent(opportunity.destination);
-      const url = Platform.select({
-        ios: `maps:0,0?q=${label}@${lat},${lng}`,
-        android: `geo:0,0?q=${lat},${lng}(${label})`,
-      });
-      Linking.openURL(url).catch(() =>
-        Alert.alert('Error', 'Could not open maps app.')
-      );
-    } else {
+    if (!hasCoords) {
       Alert.alert('Location missing', 'No coordinates available for this event.');
+      return;
     }
+    const label = encodeURIComponent(opportunity.destination || 'Event location');
+    const url = Platform.select({
+      ios: `http://maps.apple.com/?ll=${lat},${lng}&q=${label}`,
+      android: `geo:0,0?q=${lat},${lng}(${label})`,
+    });
+    Linking.openURL(url).catch(() => Alert.alert('Error', 'Could not open maps app.'));
   };
 
-  //  RENDER 
+  // RENDER
   return (
     <Provider theme={theme}>
       <SafeAreaView style={styles.container}>
@@ -144,31 +131,35 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          {/* Map preview */}
-          <View style={styles.mapContainer}>
-            {mapLoading ? (
-              <View style={styles.mapPlaceholder}>
-                <ActivityIndicator size="large" color="#000666" />
-              </View>
-            ) : mapImageUrl ? (
-              <>
-                <Image
-                  source={{ uri: mapImageUrl }}
+          {/* Map preview (Apple Maps on iOS) */}
+          <TouchableOpacity
+            style={styles.mapContainer}
+            activeOpacity={0.9}
+            onPress={openInMaps}
+            disabled={!hasCoords}
+          >
+            {hasCoords ? (
+              <View style={styles.mapImage} pointerEvents="none">
+                <MapView
                   style={styles.mapImage}
-                  resizeMode="cover"
-                  onLoadStart={() => setMapLoading(true)}
-                  onLoadEnd={() => setMapLoading(false)}
-                  onError={() => {
-                    setMapLoading(false);
-                    setMapImageUrl(null);
+                  initialRegion={{
+                    latitude: lat,
+                    longitude: lng,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
                   }}
-                />
-                <View style={styles.mapAttribution}>
-                  <Text style={styles.mapAttributionText}>
-                    Map data © OpenStreetMap, powered by LocationIQ
-                  </Text>
-                </View>
-              </>
+                  scrollEnabled={false}
+                  zoomEnabled={false}
+                  rotateEnabled={false}
+                  pitchEnabled={false}
+                  toolbarEnabled={false}
+                >
+                  <Marker
+                    coordinate={{ latitude: lat, longitude: lng }}
+                    title={opportunity.destination}
+                  />
+                </MapView>
+              </View>
             ) : (
               <View style={styles.mapPlaceholder}>
                 <Text style={styles.mapPlaceholderText}>
@@ -176,7 +167,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
                 </Text>
               </View>
             )}
-          </View>
+          </TouchableOpacity>
 
           {/* Event Details Card */}
           <View style={styles.card}>
@@ -271,7 +262,7 @@ const OpportunityDetailScreen = ({ route, navigation }) => {
   );
 };
 
-// STYLES 
+// STYLES
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -327,19 +318,6 @@ const styles = StyleSheet.create({
     color: '#767683',
     fontSize: 14,
     textAlign: 'center',
-  },
-  mapAttribution: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  mapAttributionText: {
-    fontSize: 9,
-    color: '#333',
   },
   card: {
     backgroundColor: '#ffffff',
