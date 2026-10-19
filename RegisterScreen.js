@@ -1,109 +1,63 @@
-import React, { useState } from 'react';
-import {
-  StyleSheet,
-  View,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  Dimensions,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Text, TextInput, Provider, DefaultTheme } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { setDoc, doc } from 'firebase/firestore';
+import { StyleSheet, View, SafeAreaView, Text, TouchableOpacity, ScrollView, Animated, StatusBar, ActivityIndicator } from 'react-native';
+import { TextInput, Provider, DefaultTheme } from 'react-native-paper';
+import React, { useState, useRef } from 'react';
+import { createUserWithEmailAndPassword } from "firebase/auth";
 import { db, auth } from '../firebase';
+import { setDoc, doc } from "firebase/firestore";
 
-const { height: SCREEN_H } = Dimensions.get('window');
-const isSmallDevice = SCREEN_H < 700;
-const isLargeDevice = SCREEN_H > 850;
-
-const scale = (small, normal, large) => {
-  if (isSmallDevice) return small;
-  if (isLargeDevice) return large;
-  return normal;
-};
-
-const SPACING = {
-  xs: scale(4, 6, 8),
-  sm: scale(8, 10, 12),
-  md: scale(14, 16, 20),
-  lg: scale(20, 24, 28),
-  xl: scale(28, 32, 40),
-};
-
+// ----- Custom theme -----
 const theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
     primary: '#000666',
     accent: '#000666',
-    background: '#F5F7FA',
+    background: '#f9f9f9',
     surface: '#ffffff',
     text: '#1a1c1c',
-    placeholder: '#8A8A9E',
-    border: '#DFE1E8',
+    placeholder: '#454652',
+    border: '#c6c5d4',
     primaryContainer: '#1a237e',
     onPrimaryContainer: '#ffffff',
   },
 };
 
 const RegisterScreen = ({ navigation }) => {
-  const insets = useSafeAreaInsets();
-
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [address, setAddress] = useState('');
-  const [city, setCity] = useState('');
-  const [zip, setZip] = useState('');
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [zip, setZip] = useState("");
   const [loading, setLoading] = useState(false);
   const [registered, setRegistered] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
   const signUp = async () => {
-    setErrorMsg('');
-
-    if (!name.trim() || !email.trim() || !password.trim()) {
-      setErrorMsg('Please fill in all required fields.');
-      return;
-    }
-    if (password.length < 6) {
-      setErrorMsg('Password must be at least 6 characters.');
-      return;
-    }
     if (password !== confirmPassword) {
-      setErrorMsg('Passwords do not match.');
+      alert("Passwords do not match.");
       return;
     }
-
     setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
-      );
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const userId = userCredential.user.uid;
-
-      await setDoc(doc(db, 'users', userId), {
-        name: name.trim(),
-        address: address.trim(),
-        city: city.trim(),
-        zip: zip.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
+      await setDoc(doc(db, 'students', userId), {
+        name,
+        address,
+        city,
+        zip,
+        phone,
+        email,
       });
-
+      // Show success screen
       setRegistered(true);
     } catch (error) {
-      console.error('Signup error:', error);
+      console.error("Signup error:", error);
       let msg = error.message;
       if (error.code === 'auth/email-already-in-use') {
         msg = 'This email is already registered. Please sign in.';
@@ -114,50 +68,36 @@ const RegisterScreen = ({ navigation }) => {
       } else if (error.code === 'permission-denied') {
         msg = 'Firestore permissions error. Check your security rules.';
       }
-      setErrorMsg(msg);
+      alert(msg);
     } finally {
       setLoading(false);
     }
   };
 
+  // If registered, show success screen
   if (registered) {
     return (
       <Provider theme={theme}>
-        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-          <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-
+        <SafeAreaView style={styles.safeArea}>
+          <StatusBar barStyle="dark-content" backgroundColor="#f9f9f9" />
           <View style={styles.header}>
             <View style={styles.headerBrand}>
-              <Image
-                source={require('../assets/secure-city-logo.png')}
-                style={styles.headerLogo}
-                resizeMode="contain"
-              />
-              <Text style={styles.headerTitle}>Secure City</Text>
+              <Text style={styles.headerIcon}>🛡️</Text>
+              <Text style={styles.headerTitle}>MakeMyCitySafe</Text>
             </View>
           </View>
-
-          <View style={[styles.successContainer, { paddingBottom: insets.bottom }]}>
+          <View style={styles.successContainer}>
             <View style={styles.successIcon}>
-              <Ionicons name="checkmark-circle" size={56} color="#fff" />
+              <Text style={{ fontSize: 40 }}>✅</Text>
             </View>
-            <Text style={styles.successTitle}>Account Created!</Text>
-            <Text style={styles.successSubtitle}>
-              Your profile is ready. Sign in to get started.
-            </Text>
-
+            <Text style={styles.heroTitle}>Account Created!</Text>
+            <Text style={styles.heroSubtitle}>Your profile is ready.</Text>
             <TouchableOpacity
               style={styles.primaryBtn}
               onPress={() => navigation.navigate('Login')}
               activeOpacity={0.85}
             >
-              <Text style={styles.primaryBtnText}>Continue to Sign In</Text>
-              <Ionicons
-                name="arrow-forward"
-                size={18}
-                color="#fff"
-                style={{ marginLeft: 8 }}
-              />
+              <Text style={styles.primaryBtnText}>Continue</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -165,102 +105,87 @@ const RegisterScreen = ({ navigation }) => {
     );
   }
 
+  // Registration form
   return (
     <Provider theme={theme}>
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
-
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor="#f9f9f9" />
         <View style={styles.header}>
           <View style={styles.headerBrand}>
-            <Image
-              source={require('../assets/secure-city-logo.png')}
-              style={styles.headerLogo}
-              resizeMode="contain"
-            />
-            <Text style={styles.headerTitle}>Secure City</Text>
+            <Text style={styles.headerIcon}>🛡️</Text>
+            <Text style={styles.headerTitle}>MakeMyCitySafe</Text>
           </View>
         </View>
 
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <ScrollView
-            contentContainerStyle={[
-              styles.scrollContent,
-              { paddingBottom: insets.bottom + SPACING.xl },
-            ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
+        <Animated.View style={{ flex: 1, opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
             <View style={styles.heroSection}>
-              <View style={styles.iconBox}>
-                <Image
-                  source={require('../assets/secure-city-logo.png')}
-                  style={styles.heroLogo}
-                  resizeMode="contain"
-                />
-              </View>
               <Text style={styles.heroTitle}>Create Safety Profile</Text>
-              <Text style={styles.heroSubtitle}>
-                Join the community and help secure your neighborhood.
-              </Text>
+              <Text style={styles.heroSubtitle}>Join the community and help secure your neighborhood.</Text>
             </View>
 
-            {errorMsg ? (
-              <View style={styles.errorBanner}>
-                <Ionicons name="alert-circle" size={18} color="#93000a" />
-                <Text style={styles.errorBannerText}>{errorMsg}</Text>
-              </View>
-            ) : null}
-
             <View style={styles.card}>
-              <TouchableOpacity style={styles.googleBtn} activeOpacity={0.85}>
-                <Ionicons
-                  name="logo-google"
-                  size={18}
-                  color="#1a1c1c"
-                  style={{ marginRight: 8 }}
-                />
+              {/* Google Button (optional – keep or remove) */}
+              <TouchableOpacity style={styles.googleBtn} activeOpacity={0.8}>
                 <Text style={styles.googleBtnText}>Sign up with Google</Text>
               </TouchableOpacity>
 
               <View style={styles.dividerRow}>
                 <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>OR SIGN UP WITH EMAIL</Text>
+                <Text style={styles.dividerText}>OR EMAIL</Text>
                 <View style={styles.dividerLine} />
               </View>
 
-              <Text style={styles.sectionLabel}>Personal Information</Text>
-
               <TextInput
                 style={styles.input}
-                label="Full Name *"
+                label="Full Name"
                 value={name}
                 onChangeText={setName}
-                autoCapitalize="words"
                 left={<TextInput.Icon icon="account" color="#767683" />}
                 mode="outlined"
-                outlineColor="#DFE1E8"
+                outlineColor="#c6c5d4"
                 activeOutlineColor="#000666"
                 theme={theme}
               />
-
               <TextInput
                 style={styles.input}
-                label="Email Address *"
+                label="Email Address"
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
-                autoCorrect={false}
                 keyboardType="email-address"
                 left={<TextInput.Icon icon="email" color="#767683" />}
                 mode="outlined"
-                outlineColor="#DFE1E8"
+                outlineColor="#c6c5d4"
                 activeOutlineColor="#000666"
                 theme={theme}
               />
-
+              <TextInput
+                style={styles.input}
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                left={<TextInput.Icon icon="lock" color="#767683" />}
+                mode="outlined"
+                outlineColor="#c6c5d4"
+                activeOutlineColor="#000666"
+                theme={theme}
+              />
+              <TextInput
+                style={styles.input}
+                label="Confirm Password"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                autoCapitalize="none"
+                left={<TextInput.Icon icon="check-circle" color="#767683" />}
+                mode="outlined"
+                outlineColor="#c6c5d4"
+                activeOutlineColor="#000666"
+                theme={theme}
+              />
               <TextInput
                 style={styles.input}
                 label="Phone Number"
@@ -269,325 +194,166 @@ const RegisterScreen = ({ navigation }) => {
                 keyboardType="phone-pad"
                 left={<TextInput.Icon icon="phone" color="#767683" />}
                 mode="outlined"
-                outlineColor="#DFE1E8"
+                outlineColor="#c6c5d4"
                 activeOutlineColor="#000666"
                 theme={theme}
               />
-
-              <Text style={[styles.sectionLabel, { marginTop: SPACING.sm }]}>
-                Security
-              </Text>
-
               <TextInput
                 style={styles.input}
-                label="Password *"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                autoCapitalize="none"
-                left={<TextInput.Icon icon="lock" color="#767683" />}
-                mode="outlined"
-                outlineColor="#DFE1E8"
-                activeOutlineColor="#000666"
-                theme={theme}
-              />
-
-              <TextInput
-                style={styles.input}
-                label="Confirm Password *"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry
-                autoCapitalize="none"
-                left={<TextInput.Icon icon="lock-check" color="#767683" />}
-                mode="outlined"
-                outlineColor="#DFE1E8"
-                activeOutlineColor="#000666"
-                theme={theme}
-              />
-
-              <Text style={[styles.sectionLabel, { marginTop: SPACING.sm }]}>
-                Home Address
-              </Text>
-
-              <TextInput
-                style={styles.input}
-                label="Street Address"
+                label="Address"
                 value={address}
                 onChangeText={setAddress}
                 left={<TextInput.Icon icon="map-marker" color="#767683" />}
                 mode="outlined"
-                outlineColor="#DFE1E8"
+                outlineColor="#c6c5d4"
+                activeOutlineColor="#000666"
+                theme={theme}
+              />
+              <TextInput
+                style={styles.input}
+                label="City"
+                value={city}
+                onChangeText={setCity}
+                left={<TextInput.Icon icon="city" color="#767683" />}
+                mode="outlined"
+                outlineColor="#c6c5d4"
+                activeOutlineColor="#000666"
+                theme={theme}
+              />
+              <TextInput
+                style={styles.input}
+                label="Zip Code"
+                value={zip}
+                onChangeText={setZip}
+                keyboardType="numeric"
+                left={<TextInput.Icon icon="numeric" color="#767683" />}
+                mode="outlined"
+                outlineColor="#c6c5d4"
                 activeOutlineColor="#000666"
                 theme={theme}
               />
 
-              <View style={styles.rowFields}>
-                <TextInput
-                  style={[styles.input, { flex: 2, marginRight: 8 }]}
-                  label="City"
-                  value={city}
-                  onChangeText={setCity}
-                  left={<TextInput.Icon icon="city" color="#767683" />}
-                  mode="outlined"
-                  outlineColor="#DFE1E8"
-                  activeOutlineColor="#000666"
-                  theme={theme}
-                />
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  label="Zip"
-                  value={zip}
-                  onChangeText={setZip}
-                  keyboardType="numeric"
-                  left={<TextInput.Icon icon="numeric" color="#767683" />}
-                  mode="outlined"
-                  outlineColor="#DFE1E8"
-                  activeOutlineColor="#000666"
-                  theme={theme}
-                />
-              </View>
-
               <TouchableOpacity
-                style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]}
+                style={styles.primaryBtn}
                 onPress={signUp}
                 disabled={loading}
                 activeOpacity={0.85}
               >
                 {loading ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color="white" />
                 ) : (
                   <>
-                    <Text style={styles.primaryBtnText}>Create Account</Text>
-                    <Ionicons
-                      name="arrow-forward"
-                      size={18}
-                      color="#fff"
-                      style={{ marginLeft: 8 }}
-                    />
+                    <Text style={styles.primaryBtnText}>Register Account</Text>
+                    <Text style={styles.primaryBtnIcon}>→</Text>
                   </>
                 )}
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              onPress={() => navigation.navigate('Login')}
-              style={styles.loginLink}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity onPress={() => navigation.navigate('Login')} style={styles.loginLink}>
               <Text style={styles.loginLinkText}>
-                Already have an account?{' '}
-                <Text style={styles.link}>Sign In</Text>
+                Already have an account? <Text style={styles.link}>Sign In</Text>
               </Text>
             </TouchableOpacity>
           </ScrollView>
-        </KeyboardAvoidingView>
+        </Animated.View>
       </SafeAreaView>
     </Provider>
   );
 };
 
-export default RegisterScreen;
-
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F5F7FA' },
-
+  safeArea: { flex: 1, backgroundColor: '#f9f9f9' },
   header: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    height: 56,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#E6E8EE',
+    borderBottomColor: '#e2e2e2',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
   },
-  headerBrand: { flexDirection: 'row', alignItems: 'center' },
-  headerLogo: {
-    width: scale(28, 32, 34),
-    height: scale(28, 32, 34),
-    marginRight: 8,
-  },
+  headerBrand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerIcon: { fontSize: 20 },
   headerTitle: {
-    fontSize: scale(16, 18, 20),
+    fontSize: 18,
     fontWeight: '700',
     color: '#000666',
-    letterSpacing: -0.4,
+    letterSpacing: -0.5,
   },
-
-  scrollContent: { paddingHorizontal: SPACING.md, paddingTop: SPACING.lg },
-
-  heroSection: { alignItems: 'center', marginBottom: SPACING.lg },
-  iconBox: {
-    width: scale(72, 84, 96),
-    height: scale(72, 84, 96),
-    borderRadius: scale(18, 22, 26),
-    backgroundColor: '#ffffff',
+  scrollContent: { padding: 16, paddingBottom: 32 },
+  heroSection: { alignItems: 'center', marginBottom: 20, marginTop: 8 },
+  successContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.md,
-    shadowColor: '#000666',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: '#E6E8EE',
+    paddingHorizontal: 20,
   },
-  heroLogo: { width: '75%', height: '75%' },
+  successIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#1a237e',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
   heroTitle: {
-    fontSize: scale(22, 26, 30),
+    fontSize: 26,
     fontWeight: '700',
     color: '#1a1c1c',
     textAlign: 'center',
     letterSpacing: -0.5,
   },
   heroSubtitle: {
-    fontSize: scale(13, 14, 15),
-    color: '#4A4A5A',
+    fontSize: 15,
+    color: '#454652',
     textAlign: 'center',
     marginTop: 4,
-    paddingHorizontal: SPACING.md,
   },
-
-  successContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: SPACING.lg,
-  },
-  successIcon: {
-    width: scale(90, 110, 120),
-    height: scale(90, 110, 120),
-    borderRadius: scale(45, 55, 60),
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.md,
-    shadowColor: '#2E7D32',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  successTitle: {
-    fontSize: scale(24, 28, 32),
-    fontWeight: '700',
-    color: '#1a1c1c',
-    textAlign: 'center',
-  },
-  successSubtitle: {
-    fontSize: scale(14, 15, 16),
-    color: '#4A4A5A',
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: SPACING.lg,
-    paddingHorizontal: SPACING.md,
-  },
-
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFEBEE',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FFCDD2',
-    padding: SPACING.sm,
-    marginBottom: SPACING.md,
-    gap: 8,
-  },
-  errorBannerText: {
-    color: '#93000a',
-    fontSize: scale(12, 13, 14),
-    fontWeight: '600',
-    flex: 1,
-  },
-
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: scale(14, 16, 18),
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E6E8EE',
-    padding: SPACING.md,
-    gap: SPACING.sm,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+    borderColor: '#c6c5d4',
+    padding: 20,
+    gap: 12,
   },
-
-  sectionLabel: {
-    fontSize: scale(11, 12, 13),
-    fontWeight: '700',
-    color: '#000666',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-    marginLeft: 2,
-  },
-
-  input: {
-    backgroundColor: '#F9FAFC',
-    fontSize: scale(14, 15, 16),
-  },
-  rowFields: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
   googleBtn: {
-    height: scale(48, 52, 54),
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    height: 52,
     borderWidth: 1,
-    borderColor: '#DFE1E8',
-    borderRadius: 12,
-    backgroundColor: '#F9FAFC',
-  },
-  googleBtnText: {
-    fontSize: scale(14, 15, 16),
-    fontWeight: '600',
-    color: '#1a1c1c',
-  },
-
-  dividerRow: {
-    flexDirection: 'row',
+    borderColor: '#c6c5d4',
+    borderRadius: 8,
     alignItems: 'center',
-    gap: 10,
-    marginVertical: SPACING.sm,
+    justifyContent: 'center',
+    backgroundColor: '#f9f9f9',
   },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#E6E8EE' },
+  googleBtnText: { fontSize: 15, fontWeight: '600', color: '#1a1c1c' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#e2e2e2' },
   dividerText: {
-    fontSize: scale(9, 10, 11),
-    color: '#8A8A9E',
-    letterSpacing: 0.8,
-    fontWeight: '600',
+    fontSize: 11,
+    color: '#767683',
+    letterSpacing: 0.05,
+    fontWeight: '500',
   },
-
+  input: { backgroundColor: '#f9f9f9', height: 48 },
+  link: { color: '#000666', fontWeight: '700' },
   primaryBtn: {
-    height: scale(50, 54, 56),
-    backgroundColor: '#000666',
-    borderRadius: 12,
+    height: 54,
+    backgroundColor: '#1a237e',
+    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: SPACING.sm,
-    shadowColor: '#000666',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    gap: 8,
+    marginTop: 4,
   },
-  primaryBtnDisabled: { opacity: 0.7 },
-  primaryBtnText: {
-    color: '#fff',
-    fontSize: scale(15, 16, 17),
-    fontWeight: '700',
-  },
-
-  loginLink: { marginTop: SPACING.lg, alignItems: 'center' },
-  loginLinkText: {
-    fontSize: scale(13, 14, 15),
-    color: '#4A4A5A',
-  },
-  link: { color: '#000666', fontWeight: '700' },
+  primaryBtnText: { color: 'white', fontSize: 18, fontWeight: '700' },
+  primaryBtnIcon: { color: 'white', fontSize: 20 },
+  loginLink: { marginTop: 20, alignItems: 'center' },
+  loginLinkText: { fontSize: 15, color: '#454652' },
 });
+
+export default RegisterScreen;
