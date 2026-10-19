@@ -1,112 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet,
-  Image,
-  View,
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  Dimensions,
-  Platform,
-  KeyboardAvoidingView,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Text, TextInput, Menu } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { StyleSheet, Image, View, SafeAreaView, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { IconButton, Text, TextInput, Button, Provider, Menu, Appbar } from 'react-native-paper';
+import { collection, addDoc, Timestamp } from "firebase/firestore";
 import { db, storage, auth } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import MapView, { Marker } from 'react-native-maps';
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
-
-// ---------- Responsive helpers ----------
-const { height: SCREEN_H } = Dimensions.get('window');
-const isSmallDevice = SCREEN_H < 700;
-const isLargeDevice = SCREEN_H > 850;
-
-const scale = (small, normal, large) => {
-  if (isSmallDevice) return small;
-  if (isLargeDevice) return large;
-  return normal;
-};
-
-const SPACING = {
-  xs: scale(4, 6, 8),
-  sm: scale(8, 10, 12),
-  md: scale(12, 16, 20),
-  lg: scale(16, 20, 24),
-  xl: scale(20, 24, 28),
-};
-
-// ---------- Colors ----------
-const COLORS = {
-  primary: '#000666',
-  primaryLight: '#F0F2FF',
-  background: '#F5F7FA',
-  surface: '#ffffff',
-  text: '#1a1c1c',
-  subtext: '#4A4A5A',
-  muted: '#8A8A9E',
-  border: '#E6E8EE',
-  inputBg: '#F9FAFC',
-  danger: '#D32F2F',
-  success: '#2E7D32',
-  warning: '#F57C00',
-};
-
-// ---------- Config: Categories ----------
-const CATEGORY_LIST = [
-  { label: 'Hazard', value: 'Hazard', icon: 'warning', color: '#F57C00' },
-  { label: 'Crime', value: 'Crime', icon: 'alert-circle', color: '#D32F2F' },
-  { label: 'Safe Space', value: 'SafeSpace', icon: 'shield-checkmark', color: '#2E7D32' },
-];
-
-const TYPE_LISTS = {
-  Hazard: [
-    { label: 'Traffic-Related', value: 'Traffic' },
-    { label: 'Natural Hazard', value: 'Natural' },
-    { label: 'Dangerous Infrastructure', value: 'Infra' },
-    { label: 'Path Closure', value: 'Closure' },
-  ],
-  Crime: [
-    { label: 'Violence and Threats', value: 'Violence' },
-    { label: 'Police Activity', value: 'Police' },
-    { label: 'Theft / Vandalism', value: 'Theft' },
-  ],
-  SafeSpace: [
-    { label: 'Emergency Blue Light', value: 'BlueLight' },
-    { label: 'Safe Haven / Building', value: 'SafeHaven' },
-    { label: 'Staffed Security Post', value: 'SecurityPost' },
-  ],
-};
-
-const STATUS_LIST = [
-  { label: 'Unconfirmed', value: 'Unconfirmed', icon: 'help-circle', color: '#8A8A9E' },
-  { label: 'Potential', value: 'Potential', icon: 'alert-circle', color: '#F57C00' },
-  { label: 'Active', value: 'Active', icon: 'warning', color: '#D32F2F' },
-  { label: 'In-Progress', value: 'Progress', icon: 'time', color: '#0288D1' },
-  { label: 'Resolved', value: 'Resolved', icon: 'checkmark-circle', color: '#2E7D32' },
-];
-
-const getLabel = (value, list) => {
-  const found = list.find((item) => item.value === value);
-  return found ? found.label : value;
-};
-
-const getItem = (value, list) => {
-  return list.find((item) => item.value === value) || list[0];
-};
+import * as Location from "expo-location";
 
 const HazardReportScreen = ({ navigation }) => {
-  const insets = useSafeAreaInsets();
-
-  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
-  const [showTypeMenu, setShowTypeMenu] = useState(false);
-  const [showStatusMenu, setShowStatusMenu] = useState(false);
-
+  const [showDropDownCategory, setShowDropDownCategory] = useState(false);
+  const [showDropDownType, setShowDropDownType] = useState(false);
+  const [showDropDownStatus, setShowDropDownStatus] = useState(false);
   const [category, setCategory] = useState('Hazard');
   const [type, setType] = useState('Traffic');
   const [status, setStatus] = useState('Unconfirmed');
@@ -117,22 +22,49 @@ const HazardReportScreen = ({ navigation }) => {
   const [imageurl, setImageurl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
 
-  const studentID = auth.currentUser?.uid || 'Anonymous_User';
+  const studentID = auth.currentUser?.uid || "Anonymous_User";
 
-  // -------- Initial location --------
+  const categoryList = [
+    { label: "Hazard", value: "Hazard" },
+    { label: "Crime", value: "Crime" },
+    { label: "Safe Space", value: "SafeSpace" },
+  ];
+
+  const typeLists = {
+    Hazard: [
+      { label: "Traffic-Related", value: "Traffic" },
+      { label: "Natural Hazard", value: "Natural" },
+      { label: "Dangerous infrastructure", value: "Infra" },
+      { label: "Path Closure", value: "Closure" },
+    ],
+    Crime: [
+      { label: "Violence and Threats", value: "Violence" },
+      { label: "Police activity", value: "Police" },
+      { label: "Theft / Vandalism", value: "Theft" },
+    ],
+    SafeSpace: [
+      { label: "Emergency Blue Light", value: "BlueLight" },
+      { label: "Safe Haven / Building", value: "SafeHaven" },
+      { label: "Staffed Security Post", value: "SecurityPost" },
+    ]
+  };
+
+  const hazardStatus = [
+    { label: "Unconfirmed", value: "Unconfirmed" },
+    { label: "Potential", value: "Potential" },
+    { label: "Active", value: "Active" },
+    { label: "In-Progress", value: "Progress" },
+    { label: "Resolved", value: "Resolved" },
+  ];
+
   useEffect(() => {
     const getInitialLocation = async () => {
       try {
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           const fallback = { latitude: 33.769217, longitude: -117.867665 };
-          setMapRegion({
-            ...fallback,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
-          });
+          setMapRegion({ ...fallback, latitudeDelta: 0.005, longitudeDelta: 0.005 });
           setSelectedLocation(fallback);
           return;
         }
@@ -141,20 +73,20 @@ const HazardReportScreen = ({ navigation }) => {
           latitude: locData.coords.latitude,
           longitude: locData.coords.longitude,
         };
-        setMapRegion({
-          ...coords,
-          latitudeDelta: 0.005,
-          longitudeDelta: 0.005,
-        });
+        setMapRegion({ ...coords, latitudeDelta: 0.005, longitudeDelta: 0.005 });
         setSelectedLocation(coords);
       } catch (error) {
-        console.error('Location error:', error);
+        console.error(error);
       }
     };
     getInitialLocation();
   }, []);
 
-  // -------- Image picker --------
+  const getLabel = (value, list) => {
+    const found = list.find(item => item.value === value);
+    return found ? found.label : value;
+  };
+
   const pickImage = async () => {
     try {
       let result = await ImagePicker.launchImageLibraryAsync({
@@ -179,580 +111,239 @@ const HazardReportScreen = ({ navigation }) => {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
-      const timestamp = new Date().toISOString().replace(/[:.-]/g, '');
-      const filename = `hazards/${timestamp}_${uri.substring(
-        uri.lastIndexOf('/') + 1
-      )}`;
-
+      const timestamp = new Date().toISOString().replace(/[:.-]/g, ''); 
+      const filename = `hazards/${timestamp}_${uri.substring(uri.lastIndexOf('/') + 1)}`;
+      
       const storageRef = ref(storage, filename);
       await uploadBytes(storageRef, blob);
       const url = await getDownloadURL(storageRef);
       setImageurl(url);
     } catch (error) {
-      console.error('Upload error:', error);
       Alert.alert('Upload Error', 'Failed to store image.');
-      setImage(null);
-      setImageurl('');
     } finally {
       setIsUploading(false);
     }
   };
 
-  // -------- Submit --------
   const sendHazard = async () => {
     if (!description.trim()) {
-      Alert.alert('Required', 'Please enter a short description.');
+      Alert.alert("Required Fields", "Please type a short description of the item.");
       return;
     }
     if (!selectedLocation) {
-      Alert.alert('Location Required', 'Please tap on the map to set a location.');
+      Alert.alert("Location Required", "Please select a pin on the map.");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'hazards'), {
-        category,
-        type,
+      await addDoc(collection(db, "hazards"), {
+        category: category, 
+        type: type,
         description: description.trim(),
         reportDateTime: Timestamp.fromDate(new Date()),
-        status,
-        location: selectedLocation,
+        status: status,
+        location: selectedLocation, 
         reportedBy: studentID,
-        imaguri: imageurl,
+        imaguri: imageurl
       });
 
-      Alert.alert('Success', 'Report submitted successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+      Alert.alert("Success", "Report broadcasted successfully!", [
+        { text: "OK", onPress: () => navigation.goBack() }
       ]);
     } catch (e) {
-      console.error('Submission error:', e);
-      Alert.alert('Error', 'Failed to log report.');
+      Alert.alert("Submission Error", "Failed to log report.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleBack = () => {
-    if (navigation.canGoBack()) navigation.goBack();
-    else navigation.navigate('Main');
-  };
-
-  const selectedCategory = getItem(category, CATEGORY_LIST);
-  const selectedTypeLabel = getLabel(type, TYPE_LISTS[category]);
-  const selectedStatus = getItem(status, STATUS_LIST);
-
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+    <Provider>
+      <SafeAreaView style={styles.safeArea}>
+        
+        {/* TOP HEADER BAR WITH BACK ARROW BUTTON */}
+        <Appbar.Header style={styles.headerBar}>
+          <Appbar.BackAction onPress={() => navigation.goBack()} />
+          <Appbar.Content title="File a Community Report" titleStyle={styles.headerTitle} />
+        </Appbar.Header>
 
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.headerBtn}
-        >
-          <Ionicons name="chevron-back" size={26} color={COLORS.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>File a Report</Text>
-        <View style={styles.headerBtn} />
-      </View>
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.formContainer}>
+            
+            {/* Report Category Dropdown */}
+            <Text style={styles.menuLabel}>Report Category</Text>
+            <Menu
+              visible={showDropDownCategory}
+              onDismiss={() => setShowDropDownCategory(false)}
+              anchor={
+                <Button mode="contained" onPress={() => setShowDropDownCategory(true)} style={styles.dropdownAnchor}>
+                  Category: {getLabel(category, categoryList)}
+                </Button>
+              }
+            >
+              {categoryList.map((item) => (
+                <Menu.Item 
+                  key={item.value} 
+                  onPress={() => { 
+                    setCategory(item.value); 
+                    setType(typeLists[item.value][0].value);
+                    setShowDropDownCategory(false); 
+                  }} 
+                  title={item.label} 
+                />
+              ))}
+            </Menu>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingBottom: insets.bottom + SPACING.xl },
-          ]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Info banner */}
-          <View style={styles.infoBanner}>
-            <View style={styles.infoIconBox}>
-              <Ionicons
-                name="information-circle"
-                size={22}
-                color={COLORS.primary}
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>Help keep your city safe</Text>
-              <Text style={styles.infoText}>
-                Fill in the details below. Reports are visible to the community.
-              </Text>
-            </View>
-          </View>
+            <View style={{ marginVertical: 6 }} />
 
-          {/* ---------- Category ---------- */}
-          <Text style={styles.sectionLabel}>Report Category</Text>
-          <Menu
-            visible={showCategoryMenu}
-            onDismiss={() => setShowCategoryMenu(false)}
-            anchor={
-              <TouchableOpacity
-                style={styles.pickerAnchor}
-                onPress={() => setShowCategoryMenu(true)}
-                activeOpacity={0.8}
-              >
-                <View
-                  style={[
-                    styles.pickerIconBox,
-                    { backgroundColor: `${selectedCategory.color}20` },
-                  ]}
-                >
-                  <Ionicons
-                    name={selectedCategory.icon}
-                    size={18}
-                    color={selectedCategory.color}
-                  />
-                </View>
-                <Text style={styles.pickerText}>{selectedCategory.label}</Text>
-                <Ionicons name="chevron-down" size={18} color={COLORS.muted} />
-              </TouchableOpacity>
-            }
-          >
-            {CATEGORY_LIST.map((item) => (
-              <Menu.Item
-                key={item.value}
-                onPress={() => {
-                  setCategory(item.value);
-                  setType(TYPE_LISTS[item.value][0].value);
-                  setShowCategoryMenu(false);
-                }}
-                title={item.label}
-                leadingIcon={item.icon}
-              />
-            ))}
-          </Menu>
+            {/* Dynamic Type Dropdown */}
+            <Text style={styles.menuLabel}>Type Specifics</Text>
+            <Menu
+              visible={showDropDownType}
+              onDismiss={() => setShowDropDownType(false)}
+              anchor={
+                <Button mode="outlined" onPress={() => setShowDropDownType(true)} style={styles.dropdownAnchor} contentStyle={styles.dropdownAnchorContent}>
+                  {getLabel(type, typeLists[category])}
+                </Button>
+              }
+            >
+              {typeLists[category].map((item) => (
+                <Menu.Item key={item.value} onPress={() => { setType(item.value); setShowDropDownType(false); }} title={item.label} />
+              ))}
+            </Menu>
 
-          {/* ---------- Type ---------- */}
-          <Text style={[styles.sectionLabel, { marginTop: SPACING.md }]}>
-            Type Specifics
-          </Text>
-          <Menu
-            visible={showTypeMenu}
-            onDismiss={() => setShowTypeMenu(false)}
-            anchor={
-              <TouchableOpacity
-                style={styles.pickerAnchor}
-                onPress={() => setShowTypeMenu(true)}
-                activeOpacity={0.8}
-              >
-                <View
-                  style={[
-                    styles.pickerIconBox,
-                    { backgroundColor: `${selectedCategory.color}20` },
-                  ]}
-                >
-                  <Ionicons
-                    name="pricetag"
-                    size={18}
-                    color={selectedCategory.color}
-                  />
-                </View>
-                <Text style={styles.pickerText}>{selectedTypeLabel}</Text>
-                <Ionicons name="chevron-down" size={18} color={COLORS.muted} />
-              </TouchableOpacity>
-            }
-          >
-            {TYPE_LISTS[category].map((item) => (
-              <Menu.Item
-                key={item.value}
-                onPress={() => {
-                  setType(item.value);
-                  setShowTypeMenu(false);
-                }}
-                title={item.label}
-              />
-            ))}
-          </Menu>
+            <View style={{ marginVertical: 6 }} />
 
-          {/* ---------- Status ---------- */}
-          <Text style={[styles.sectionLabel, { marginTop: SPACING.md }]}>
-            Status
-          </Text>
-          <Menu
-            visible={showStatusMenu}
-            onDismiss={() => setShowStatusMenu(false)}
-            anchor={
-              <TouchableOpacity
-                style={styles.pickerAnchor}
-                onPress={() => setShowStatusMenu(true)}
-                activeOpacity={0.8}
-              >
-                <View
-                  style={[
-                    styles.pickerIconBox,
-                    { backgroundColor: `${selectedStatus.color}20` },
-                  ]}
-                >
-                  <Ionicons
-                    name={selectedStatus.icon}
-                    size={18}
-                    color={selectedStatus.color}
-                  />
-                </View>
-                <Text style={styles.pickerText}>{selectedStatus.label}</Text>
-                <Ionicons name="chevron-down" size={18} color={COLORS.muted} />
-              </TouchableOpacity>
-            }
-          >
-            {STATUS_LIST.map((item) => (
-              <Menu.Item
-                key={item.value}
-                onPress={() => {
-                  setStatus(item.value);
-                  setShowStatusMenu(false);
-                }}
-                title={item.label}
-                leadingIcon={item.icon}
-              />
-            ))}
-          </Menu>
+            {/* Status Dropdown */}
+            <Text style={styles.menuLabel}>Status</Text>
+            <Menu
+              visible={showDropDownStatus}
+              onDismiss={() => setShowDropDownStatus(false)}
+              anchor={
+                <Button mode="outlined" onPress={() => setShowDropDownStatus(true)} style={styles.dropdownAnchor} contentStyle={styles.dropdownAnchorContent}>
+                  {getLabel(status, hazardStatus)}
+                </Button>
+              }
+            >
+              {hazardStatus.map((item) => (
+                <Menu.Item key={item.value} onPress={() => { setStatus(item.value); setShowDropDownStatus(false); }} title={item.label} />
+              ))}
+            </Menu>
 
-          {/* ---------- Description ---------- */}
-          <Text style={[styles.sectionLabel, { marginTop: SPACING.md }]}>
-            Description
-          </Text>
-          <TextInput
-            value={description}
-            onChangeText={setDescription}
-            mode="outlined"
-            multiline
-            numberOfLines={4}
-            placeholder="Describe what you saw..."
-            placeholderTextColor={COLORS.muted}
-            style={styles.textArea}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.primary}
-            theme={{ colors: { background: COLORS.surface } }}
-          />
+            <TextInput
+              label="Description"
+              value={description}
+              onChangeText={setDescription}
+              mode='outlined'
+              multiline
+              numberOfLines={2}
+              style={{ marginTop: 15 }}
+            />
 
-          {/* ---------- Map Picker ---------- */}
-          <Text style={[styles.sectionLabel, { marginTop: SPACING.md }]}>
-            Location
-          </Text>
-          <Text style={styles.helperText}>
-            Tap the map to place a pin at the exact spot
-          </Text>
-          <View
-            style={styles.mapContainer}
-            onLayout={() => setMapReady(true)}
-          >
-            {!mapReady || !mapRegion ? (
-              <View style={styles.mapPlaceholder}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.mapPlaceholderText}>
-                  Loading map...
-                </Text>
-              </View>
-            ) : (
+            {/* Interactive Map Picker Element */}
+            <Text style={[styles.menuLabel, { marginTop: 15 }]}>Tap Map to Specify Location:</Text>
+            {mapRegion ? (
               <MapView
                 style={styles.miniMap}
                 initialRegion={mapRegion}
-                onPress={(e) =>
-                  setSelectedLocation(e.nativeEvent.coordinate)
-                }
+                onPress={(e) => setSelectedLocation(e.nativeEvent.coordinate)}
               >
                 {selectedLocation && (
-                  <Marker
-                    coordinate={selectedLocation}
-                    title="Selected Point"
-                    pinColor={COLORS.danger}
-                  />
+                  <Marker coordinate={selectedLocation} title="Selected Point" pinColor="red" />
                 )}
               </MapView>
-            )}
-          </View>
-
-          {selectedLocation && (
-            <View style={styles.coordsRow}>
-              <Ionicons name="location" size={12} color={COLORS.muted} />
-              <Text style={styles.coordsText}>
-                {selectedLocation.latitude.toFixed(5)},{' '}
-                {selectedLocation.longitude.toFixed(5)}
-              </Text>
-            </View>
-          )}
-
-          {/* ---------- Image Picker ---------- */}
-          <Text style={[styles.sectionLabel, { marginTop: SPACING.md }]}>
-            Photo (Optional)
-          </Text>
-          <TouchableOpacity
-            style={styles.imageButton}
-            onPress={pickImage}
-            disabled={isUploading || isSubmitting}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={image ? 'image' : 'camera'}
-              size={20}
-              color={COLORS.primary}
-            />
-            <Text style={styles.imageButtonText}>
-              {isUploading
-                ? 'Uploading...'
-                : image
-                ? 'Change photo'
-                : 'Add photo from gallery'}
-            </Text>
-            {isUploading && (
-              <ActivityIndicator size="small" color={COLORS.primary} />
-            )}
-          </TouchableOpacity>
-
-          {image && !isUploading && (
-            <View style={styles.imagePreviewWrap}>
-              <Image source={{ uri: image }} style={styles.imagePreview} />
-              <TouchableOpacity
-                style={styles.removeImageBtn}
-                onPress={() => {
-                  setImage(null);
-                  setImageurl('');
-                }}
-              >
-                <Ionicons name="close" size={14} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* ---------- Submit ---------- */}
-          <TouchableOpacity
-            style={[
-              styles.submitButton,
-              (isSubmitting || isUploading) && styles.submitButtonDisabled,
-            ]}
-            onPress={sendHazard}
-            disabled={isSubmitting || isUploading}
-            activeOpacity={0.85}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#fff" />
             ) : (
-              <>
-                <Ionicons name="paper-plane" size={18} color="#fff" />
-                <Text style={styles.submitButtonText}>Submit Report</Text>
-              </>
+              <View style={styles.mapPlaceholder}><Text>Loading positioning map...</Text></View>
             )}
-          </TouchableOpacity>
+
+            <Button icon="camera" mode="outlined" onPress={pickImage} style={{ marginTop: 15 }} disabled={isUploading || isSubmitting}>
+              {isUploading ? "Uploading Image..." : "Pick image from gallery"}
+            </Button>
+
+            {isUploading && <ActivityIndicator size="small" color="#6200ee" style={{ marginTop: 10 }} />}
+            
+            {image && !isUploading && (
+              <View style={styles.imagePreviewContainer}>
+                <Image source={{ uri: image }} style={styles.imagePreview} />
+              </View>
+            )}
+
+            <Button icon="alert" mode="contained" style={{ marginTop: 20, marginBottom: 30 }} onPress={sendHazard} loading={isSubmitting} disabled={isUploading || isSubmitting}>
+              Submit Report
+            </Button>
+
+          </View>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </Provider>
   );
 };
 
-export default HazardReportScreen;
-
-// ---------- Styles ----------
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+  safeArea: { 
+    flex: 1, 
+    backgroundColor: '#fff' 
   },
-  headerBtn: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
+  headerBar: {
+    backgroundColor: '#fff',
+    elevation: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E0E0E0',
+    height: 52,
   },
   headerTitle: {
-    fontSize: scale(16, 18, 20),
-    fontWeight: '700',
-    color: COLORS.primary,
+    fontSize: 18,
+    fontWeight: 'bold',
   },
-
-  scrollContent: {
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
+  scrollContainer: { 
+    paddingBottom: 20 
   },
-
-  // Info banner
-  infoBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primaryLight,
-    padding: SPACING.md,
-    borderRadius: scale(12, 14, 16),
-    marginBottom: SPACING.md,
-    gap: SPACING.sm,
+  formContainer: { 
+    marginTop: 15, 
+    marginHorizontal: 30 
   },
-  infoIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
+  menuLabel: { 
+    fontSize: 12, 
+    color: '#666', 
+    marginBottom: 4, 
+    marginLeft: 4 
   },
-  infoTitle: {
-    fontSize: scale(13, 14, 15),
-    fontWeight: '700',
-    color: COLORS.primary,
+  dropdownAnchor: { 
+    borderRadius: 4, 
+    borderColor: '#79747E' 
   },
-  infoText: {
-    fontSize: scale(11, 12, 13),
-    color: COLORS.subtext,
-    marginTop: 2,
+  dropdownAnchorContent: { 
+    justifyContent: 'flex-start', 
+    height: 44 
   },
-
-  // Section labels
-  sectionLabel: {
-    fontSize: scale(12, 13, 14),
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 6,
-    marginLeft: 2,
+  miniMap: { 
+    width: '100%', 
+    height: 180, 
+    borderRadius: 8, 
+    marginVertical: 5 
   },
-  helperText: {
-    fontSize: scale(10, 11, 12),
-    color: COLORS.muted,
-    marginBottom: 8,
-    marginLeft: 2,
+  mapPlaceholder: { 
+    width: '100%', 
+    height: 180, 
+    backgroundColor: '#eee', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    borderRadius: 8 
   },
-
-  // Picker
-  pickerAnchor: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 10,
+  imagePreviewContainer: { 
+    alignItems: 'center', 
+    marginTop: 10, 
+    borderWidth: 1, 
+    borderColor: '#ccc', 
+    borderRadius: 8, 
+    padding: 5 
   },
-  pickerIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pickerText: {
-    flex: 1,
-    fontSize: scale(13, 14, 15),
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-
-  // Text area
-  textArea: {
-    backgroundColor: COLORS.surface,
-    fontSize: scale(13, 14, 15),
-  },
-
-  // Map
-  mapContainer: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    height: scale(160, 190, 220),
-    backgroundColor: COLORS.surface,
-  },
-  miniMap: {
-    width: '100%',
-    height: '100%',
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  mapPlaceholderText: {
-    color: COLORS.muted,
-    fontSize: scale(11, 12, 13),
-  },
-  coordsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 6,
-    marginLeft: 2,
-  },
-  coordsText: {
-    fontSize: scale(10, 11, 12),
-    color: COLORS.muted,
-  },
-
-  // Image
-  imageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    paddingVertical: scale(12, 14, 16),
-  },
-  imageButtonText: {
-    fontSize: scale(12, 13, 14),
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
-  imagePreviewWrap: {
-    marginTop: SPACING.sm,
-    borderRadius: 12,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  imagePreview: {
-    width: '100%',
-    height: scale(160, 190, 220),
-    borderRadius: 12,
-  },
-  removeImageBtn: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Submit
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: COLORS.primary,
-    paddingVertical: scale(14, 16, 18),
-    borderRadius: 14,
-    marginTop: SPACING.lg,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  submitButtonDisabled: { opacity: 0.6 },
-  submitButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: scale(14, 15, 16),
+  imagePreview: { 
+    width: '100%', 
+    height: 140, 
+    borderRadius: 6 
   },
 });
+
+export default HazardReportScreen;
