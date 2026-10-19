@@ -6,13 +6,10 @@ import {
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
-  Image,
   Alert,
   Modal,
   StatusBar,
   Dimensions,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from 'react-native-paper';
@@ -30,6 +27,9 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+
+// Firestore collection that holds student profiles
+const USERS = 'students';
 
 // ---------- Responsive helpers ----------
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -115,7 +115,7 @@ const SocialScreen = ({ navigation }) => {
   useEffect(() => {
     if (!currentUserId) return;
 
-    const userDocRef = doc(db, 'users', currentUserId);
+    const userDocRef = doc(db, USERS, currentUserId);
     const unsubscribe = onSnapshot(
       userDocRef,
       (snapshot) => {
@@ -155,7 +155,7 @@ const SocialScreen = ({ navigation }) => {
 
         for (const chunk of idChunks) {
           const q = query(
-            collection(db, 'users'),
+            collection(db, USERS),
             where('__name__', 'in', chunk)
           );
           const snapshot = await getDocs(q);
@@ -188,50 +188,23 @@ const SocialScreen = ({ navigation }) => {
   }, []);
 
   // ---------- Search ----------
+  // Fetches students and filters on the client so names match anywhere
+  // in the string, regardless of case.
   const handleSearch = async () => {
-    const trimmedQuery = searchText.trim();
-    if (!trimmedQuery) return;
+    const q = searchText.trim().toLowerCase();
+    if (!q) return;
 
     setLoading(true);
     setHasSearched(true);
 
-    const formattedQuery = trimmedQuery.toLowerCase();
-
     try {
-      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(collection(db, USERS));
+      const matches = snapshot.docs
+        .filter((d) => d.id !== currentUserId)
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((u) => (u.name || '').toLowerCase().includes(q));
 
-      const qExact = query(
-        usersRef,
-        where('name', '>=', trimmedQuery),
-        where('name', '<=', trimmedQuery + '\uf8ff')
-      );
-
-      const qLowercase = query(
-        usersRef,
-        where('name_lowercase', '>=', formattedQuery),
-        where('name_lowercase', '<=', formattedQuery + '\uf8ff')
-      );
-
-      const [snapshotExact, snapshotLowercase] = await Promise.all([
-        getDocs(qExact),
-        getDocs(qLowercase),
-      ]);
-
-      const usersMap = new Map();
-
-      snapshotExact.forEach((docSnap) => {
-        if (docSnap.id !== currentUserId) {
-          usersMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
-        }
-      });
-
-      snapshotLowercase.forEach((docSnap) => {
-        if (docSnap.id !== currentUserId) {
-          usersMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
-        }
-      });
-
-      setResults(Array.from(usersMap.values()));
+      setResults(matches);
     } catch (error) {
       console.error('Search error:', error);
       Alert.alert('Error', 'Failed to search users. Please try again.');
@@ -249,10 +222,10 @@ const SocialScreen = ({ navigation }) => {
   // ---------- Friend requests ----------
   const sendFriendRequest = async (targetUserId) => {
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
+      await updateDoc(doc(db, USERS, currentUserId), {
         outgoingRequests: arrayUnion(targetUserId),
       });
-      await updateDoc(doc(db, 'users', targetUserId), {
+      await updateDoc(doc(db, USERS, targetUserId), {
         incomingRequests: arrayUnion(currentUserId),
       });
       Alert.alert('Success', 'Friend request sent!');
@@ -264,8 +237,8 @@ const SocialScreen = ({ navigation }) => {
 
   const acceptFriendRequest = async (targetUserId) => {
     try {
-      const myRef = doc(db, 'users', currentUserId);
-      const friendRef = doc(db, 'users', targetUserId);
+      const myRef = doc(db, USERS, currentUserId);
+      const friendRef = doc(db, USERS, targetUserId);
 
       await updateDoc(myRef, {
         friends: arrayUnion(targetUserId),
@@ -286,10 +259,10 @@ const SocialScreen = ({ navigation }) => {
 
   const rejectFriendRequest = async (targetUserId) => {
     try {
-      await updateDoc(doc(db, 'users', currentUserId), {
+      await updateDoc(doc(db, USERS, currentUserId), {
         incomingRequests: arrayRemove(targetUserId),
       });
-      await updateDoc(doc(db, 'users', targetUserId), {
+      await updateDoc(doc(db, USERS, targetUserId), {
         outgoingRequests: arrayRemove(currentUserId),
       });
     } catch (err) {
@@ -308,10 +281,10 @@ const SocialScreen = ({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await updateDoc(doc(db, 'users', currentUserId), {
+              await updateDoc(doc(db, USERS, currentUserId), {
                 friends: arrayRemove(targetUserId),
               });
-              await updateDoc(doc(db, 'users', targetUserId), {
+              await updateDoc(doc(db, USERS, targetUserId), {
                 friends: arrayRemove(currentUserId),
               });
             } catch (err) {
@@ -335,7 +308,7 @@ const SocialScreen = ({ navigation }) => {
       mapUnsubscribeRef.current();
     }
 
-    const friendDocRef = doc(db, 'users', friend.id);
+    const friendDocRef = doc(db, USERS, friend.id);
 
     mapUnsubscribeRef.current = onSnapshot(
       friendDocRef,
